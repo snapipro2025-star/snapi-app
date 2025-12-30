@@ -1,94 +1,106 @@
-import React, { useState } from "react";
-import { Pressable, Text, ViewStyle } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
+import React from "react";
+import { Pressable, Text, View, ViewStyle, StyleProp } from "react-native";
 import { Colors } from "../theme/colors";
 import { Tokens } from "../theme/tokens";
 
 type BtnProps = {
   title: string;
   onPress?: () => void;
-  style?: ViewStyle;
+  disabled?: boolean;
+  style?: StyleProp<ViewStyle>;
 };
 
-export function PrimaryButton({ title, onPress, style }: BtnProps) {
-  const [pressed, setPressed] = useState(false);
-
+export function ActionBlock({
+  children,
+  style,
+}: {
+  children: React.ReactNode;
+  style?: StyleProp<ViewStyle>;
+}) {
   return (
-    <Pressable
-      onPress={onPress}
-      onPressIn={() => setPressed(true)}
-      onPressOut={() => setPressed(false)}
+    <View
       style={[
         {
-          height: Tokens.btnH,
-          borderRadius: Tokens.rBtn,
+          padding: Tokens?.pad?.screen ?? 16,
+          borderRadius: 22,
+          backgroundColor: "rgba(8, 18, 40, 0.86)", // dark blue block
           borderWidth: 1,
-          borderColor: pressed ? "rgba(0,229,255,.34)" : "rgba(0,229,255,.28)",
-          overflow: "hidden",
-
-          // softer, more “dashboard” aura (not a big blob)
-          shadowColor: Colors.accent,
-          shadowOpacity: pressed ? 0.18 : 0.16,
-          shadowRadius: pressed ? 14 : 18,
-          elevation: pressed ? 7 : 9,
+          borderColor: "rgba(148,163,184,0.18)",
         },
         style,
       ]}
     >
-      <LinearGradient
-        colors={[
-          pressed ? Colors.btnTopHover : Colors.btnTop,
-          pressed ? Colors.btnBottomHover : Colors.btnBottom,
-        ]}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
-        style={{
-          flex: 1,
+      {children}
+    </View>
+  );
+}
+
+/** PRIMARY: aqua outline + white text (sits on ActionBlock) */
+export function PrimaryButton({ title, onPress, disabled, style }: BtnProps) {
+  const aqua = Colors?.accent ?? "#00E5FF";
+
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      style={({ pressed }) => [
+        {
+          borderWidth: 1.6,
+          borderColor: aqua,
+          borderRadius: 999,
+          paddingVertical: 14,
+          paddingHorizontal: 18,
           alignItems: "center",
           justifyContent: "center",
+          backgroundColor: "transparent",
+          opacity: disabled ? 0.45 : pressed ? 0.88 : 1,
+        },
+        style as any,
+      ]}
+    >
+      <Text
+        style={{
+          color: "#FFFFFF",
+          fontSize: 16,
+          fontWeight: "800",
+          letterSpacing: 0.2,
         }}
       >
-        {/* inner highlight ring to mimic inset stroke */}
-        <LinearGradient
-          colors={["rgba(0,229,255,.14)", "rgba(0,229,255,0)"]}
-          start={{ x: 0.2, y: 0.1 }}
-          end={{ x: 0.8, y: 1 }}
-          style={{
-            position: "absolute",
-            inset: 0,
-          }}
-        />
-
-        <Text style={{ color: Colors.text, fontWeight: "900", fontSize: 15 }}>
-          {title}
-        </Text>
-      </LinearGradient>
+        {title}
+      </Text>
     </Pressable>
   );
 }
 
-export function GhostButton({ title, onPress, style }: BtnProps) {
-  const [pressed, setPressed] = useState(false);
-
+/** SECONDARY: subtle outline, still white text (never louder than primary) */
+export function GhostButton({ title, onPress, disabled, style }: BtnProps) {
   return (
     <Pressable
       onPress={onPress}
-      onPressIn={() => setPressed(true)}
-      onPressOut={() => setPressed(false)}
-      style={[
+      disabled={disabled}
+      style={({ pressed }) => [
         {
-          height: Tokens.btnH,
-          borderRadius: Tokens.rBtn,
+          marginTop: 10,
           borderWidth: 1,
-          borderColor: pressed ? "rgba(148,163,184,.32)" : Colors.border,
-          backgroundColor: "rgba(10,16,32,.6)",
+          borderColor: "rgba(148,163,184,0.22)",
+          borderRadius: 999,
+          paddingVertical: 13,
+          paddingHorizontal: 18,
           alignItems: "center",
           justifyContent: "center",
+          backgroundColor: "rgba(2, 6, 20, 0.22)",
+          opacity: disabled ? 0.45 : pressed ? 0.9 : 1,
         },
-        style,
+        style as any,
       ]}
     >
-      <Text style={{ color: Colors.muted, fontWeight: "900", fontSize: 15 }}>
+      <Text
+        style={{
+          color: "rgba(255,255,255,0.88)",
+          fontSize: 14.5,
+          fontWeight: "750",
+        }}
+      >
         {title}
       </Text>
     </Pressable>
