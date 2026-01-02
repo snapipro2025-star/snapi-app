@@ -124,8 +124,8 @@ export default function WelcomeScreen({ navigation }: Props) {
 
         {/* ---------- ACTIONS ---------- */}
         <View style={styles.actions}>
-          <PrimaryButton label="Get Protected" onPress={goToOnboarding} />
-          <GhostButton label="Secure sign-in" onPress={goToSignIn} />
+          <PrimaryButton title="Get Protected" onPress={goToOnboarding} />
+          <GhostButton title="Secure sign-in" onPress={goToSignIn} />
         </View>
       </View>
     </GlassBackground>
