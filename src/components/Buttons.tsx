@@ -1,8 +1,17 @@
 import React from "react";
-import { Pressable, Text, View, ViewStyle, StyleProp } from "react-native";
+import {
+  Pressable,
+  Text,
+  View,
+  ViewStyle,
+  StyleProp,
+} from "react-native";
 import { Colors } from "../theme/colors";
 import { Tokens } from "../theme/tokens";
 
+/* ──────────────────────────────────────────────
+   Shared types
+────────────────────────────────────────────── */
 type BtnProps = {
   title: string;
   onPress?: () => void;
@@ -10,20 +19,25 @@ type BtnProps = {
   style?: StyleProp<ViewStyle>;
 };
 
-export function ActionBlock({
-  children,
-  style,
-}: {
+type BlockProps = {
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
-}) {
+};
+
+/* ──────────────────────────────────────────────
+   ActionBlock
+────────────────────────────────────────────── */
+export function ActionBlock({ children, style }: BlockProps) {
+  const padding =
+    Tokens?.pad?.screen !== undefined ? Tokens.pad.screen : 16;
+
   return (
     <View
       style={[
         {
-          padding: Tokens?.pad?.screen ?? 16,
+          padding,
           borderRadius: 22,
-          backgroundColor: "rgba(8, 18, 40, 0.86)", // dark blue block
+          backgroundColor: "rgba(8,18,40,0.86)",
           borderWidth: 1,
           borderColor: "rgba(148,163,184,0.18)",
         },
@@ -35,9 +49,16 @@ export function ActionBlock({
   );
 }
 
-/** PRIMARY: aqua outline + white text (sits on ActionBlock) */
-export function PrimaryButton({ title, onPress, disabled, style }: BtnProps) {
-  const aqua = Colors?.accent ?? "#00E5FF";
+/* ──────────────────────────────────────────────
+   PrimaryButton
+────────────────────────────────────────────── */
+export function PrimaryButton({
+  title,
+  onPress,
+  disabled = false,
+  style,
+}: BtnProps) {
+  const accent = Colors?.accent ?? "#00E5FF";
 
   return (
     <Pressable
@@ -46,7 +67,7 @@ export function PrimaryButton({ title, onPress, disabled, style }: BtnProps) {
       style={({ pressed }) => [
         {
           borderWidth: 1.6,
-          borderColor: aqua,
+          borderColor: accent,
           borderRadius: 999,
           paddingVertical: 14,
           paddingHorizontal: 18,
@@ -55,8 +76,10 @@ export function PrimaryButton({ title, onPress, disabled, style }: BtnProps) {
           backgroundColor: "transparent",
           opacity: disabled ? 0.45 : pressed ? 0.88 : 1,
         },
-        style as any,
+        style,
       ]}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
     >
       <Text
         style={{
@@ -72,8 +95,15 @@ export function PrimaryButton({ title, onPress, disabled, style }: BtnProps) {
   );
 }
 
-/** SECONDARY: subtle outline, still white text (never louder than primary) */
-export function GhostButton({ title, onPress, disabled, style }: BtnProps) {
+/* ──────────────────────────────────────────────
+   GhostButton
+────────────────────────────────────────────── */
+export function GhostButton({
+  title,
+  onPress,
+  disabled = false,
+  style,
+}: BtnProps) {
   return (
     <Pressable
       onPress={onPress}
@@ -88,17 +118,19 @@ export function GhostButton({ title, onPress, disabled, style }: BtnProps) {
           paddingHorizontal: 18,
           alignItems: "center",
           justifyContent: "center",
-          backgroundColor: "rgba(2, 6, 20, 0.22)",
+          backgroundColor: "rgba(2,6,20,0.22)",
           opacity: disabled ? 0.45 : pressed ? 0.9 : 1,
         },
-        style as any,
+        style,
       ]}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
     >
       <Text
         style={{
           color: "rgba(255,255,255,0.88)",
           fontSize: 14.5,
-          fontWeight: "750",
+          fontWeight: "700",
         }}
       >
         {title}

@@ -1,49 +1,94 @@
-﻿import React, { useEffect } from "react";
-import { View, Text } from "react-native";
-import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { RootStackParamList } from "../navigation/RootNavigator";
-import { Colors } from "../theme/colors";
+﻿import React, { useEffect, useRef } from "react";
+import {
+  View,
+  StyleSheet,
+  Animated,
+  AccessibilityInfo,
+  Easing,
+} from "react-native";
 import GlassBackground from "../components/GlassBackground";
 
-type Props = NativeStackScreenProps<RootStackParamList, "Splash">;
+type Props = { onFinish: () => void };
 
-export default function SplashScreen({ navigation }: Props) {
+export default function SplashScreen({ onFinish }: Props) {
+  const imageOpacity = useRef(new Animated.Value(0)).current;
+  const done = useRef(false);
+
   useEffect(() => {
-    const t = setTimeout(() => navigation.replace("Welcome"), 3000);
-    return () => clearTimeout(t);
-  }, [navigation]);
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+
+    const finish = () => {
+      if (done.current) return;
+      done.current = true;
+      onFinish();
+    };
+
+    // reset on mount
+    imageOpacity.stopAnimation();
+    imageOpacity.setValue(0);
+
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((reduced) => {
+        if (reduced) {
+          imageOpacity.setValue(0.85);
+          timeout = setTimeout(finish, 900);
+          return;
+        }
+
+        // Fade vault in
+        Animated.timing(imageOpacity, {
+          toValue: 0.5, // vault strength
+          duration: 520,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }).start();
+
+        // Hold a bit longer (premium feel)
+        timeout = setTimeout(finish, 1800);
+      })
+      .catch(() => {
+        imageOpacity.setValue(0.85);
+        timeout = setTimeout(finish, 1800);
+      });
+
+    return () => {
+      done.current = true;
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [onFinish, imageOpacity]);
 
   return (
     <GlassBackground>
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-        <View
-          style={{
-            width: 90,
-            height: 90,
-            borderRadius: 28,
-            borderWidth: 1,
-            borderColor: "rgba(0,229,255,.22)",
-            backgroundColor: "rgba(11,21,48,.9)",
-            alignItems: "center",
-            justifyContent: "center",
-            shadowColor: Colors.accent,
-            shadowOpacity: 0.35,
-            shadowRadius: 22,
-            elevation: 10,
-          }}
-        >
-          <Text style={{ color: Colors.text, fontSize: 28, fontWeight: "900" }}>S</Text>
-        </View>
+      <View style={styles.screen}>
+        <Animated.Image
+          source={require("../../assets/splash/vault-phone.png")}
+          style={[styles.image, { opacity: imageOpacity }]}
+          resizeMode="contain"
+          fadeDuration={0} // Android safety
+        />
 
-        <Text style={{ color: Colors.text, fontSize: 30, fontWeight: "900", marginTop: 18 }}>
-          SNAPI
-        </Text>
-
-        <Text style={{ color: Colors.muted, marginTop: 8, textAlign: "center", paddingHorizontal: 28, lineHeight: 20 }}>
-          Personal Call Protection Powered by AI
-        </Text>
+        {/* Subtle edge blend so it doesn’t feel like a hard rectangle */}
+        <View pointerEvents="none" style={styles.edgeBlend} />
       </View>
     </GlassBackground>
   );
 }
 
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  image: {
+    width: "92%",
+    maxWidth: 520,
+    aspectRatio: 16 / 9,
+  },
+
+  edgeBlend: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(5,8,22,0.28)",
+  },
+});

@@ -1,92 +1,137 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 import { View, Text } from "react-native";
 import GlassBackground from "../components/GlassBackground";
 import GlassCard from "../components/GlassCard";
 import { ActionBlock, PrimaryButton, GhostButton } from "../components/Buttons";
 import { Colors } from "../theme/colors";
 import { Tokens } from "../theme/tokens";
+import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import type { RootStackParamList } from "../navigation/RootNavigator";
+import { setOnboardingComplete } from "../lib/onboarding";
 
-export default function OnboardingScreen() {
+type Step = {
+  kicker: string;
+  title: string;
+  body: string;
+  trust?: string;
+  primary: string;
+  secondary: string;
+};
+
+type Props = NativeStackScreenProps<RootStackParamList, "Onboarding">;
+
+export default function OnboardingScreen({ navigation }: Props) {
+  const padX = Tokens?.pad?.screen ?? 18;
+  const [stepIndex, setStepIndex] = useState(0);
+
+  const steps: Step[] = useMemo(
+    () => [
+      {
+        kicker: "Welcome",
+        title: "Personal Call Protection",
+        body: "SNAPI quietly screens unknown callers before they ever reach you.",
+        primary: "Continue",
+        secondary: "Back",
+      },
+      {
+        kicker: "Privacy First",
+        title: "You stay in control",
+        body: "Only suspicious calls are intercepted. Trusted callers ring through.",
+        primary: "Continue",
+        secondary: "Back",
+      },
+      {
+        kicker: "All Set",
+        title: "Protection is ready",
+        body: "You’re protected. SNAPI will handle the rest.",
+        primary: "Finish",
+        secondary: "Back",
+      },
+    ],
+    []
+  );
+
+  const step = steps[stepIndex];
+  const isLast = stepIndex === steps.length - 1;
+
+  async function finishOnboarding() {
+    await setOnboardingComplete();
+    navigation.replace("Home");
+  }
+
+  function handlePrimary() {
+    if (isLast) {
+      finishOnboarding();
+    } else {
+      setStepIndex((i) => i + 1);
+    }
+  }
+
+  function handleSecondary() {
+    if (stepIndex > 0) {
+      setStepIndex((i) => i - 1);
+    }
+  }
+
   return (
     <GlassBackground>
       <View
         style={{
           flex: 1,
-          paddingHorizontal: Tokens?.pad?.screen ?? 18,
-          paddingTop: 22,
-          paddingBottom: 16,
+          paddingHorizontal: padX,
+          paddingVertical: Tokens.pad.screen,
+          justifyContent: "center",
         }}
       >
-        {/* Top content */}
-        <GlassCard
-          style={{
-            padding: 18,
-            borderRadius: 26,
-            borderWidth: 1,
-            borderColor: "rgba(148,163,184,0.22)",
-            backgroundColor: "rgba(11,21,48,0.28)",
-          }}
-        >
+        <GlassCard>
           <Text
             style={{
-              color: Colors?.textMuted ?? "rgba(156,163,175,0.95)",
-              fontSize: 12.5,
-              fontWeight: "800",
-              letterSpacing: 0.3,
+              color: Colors.muted,
+              fontSize: 12,
+              marginBottom: 6,
               textTransform: "uppercase",
+              letterSpacing: 1,
             }}
           >
-            Getting started
+            {step.kicker}
           </Text>
 
           <Text
             style={{
-              marginTop: 10,
-              color: Colors?.textPrimary ?? "#f9fafb",
-              fontSize: 22,
-              fontWeight: "900",
-              lineHeight: 27,
-              letterSpacing: 0.2,
+              color: Colors.text,
+              fontSize: 26,
+              fontWeight: "700",
+              marginBottom: 12,
             }}
           >
-            SNAPI works quietly in the background.
+            {step.title}
           </Text>
 
           <Text
             style={{
-              marginTop: 12,
-              color: Colors?.textMuted ?? "rgba(156,163,175,0.95)",
-              fontSize: 13.5,
-              lineHeight: 19,
+              color: Colors.subtle,
+              fontSize: 16,
+              lineHeight: 22,
+              marginBottom: 24,
             }}
           >
-            To quietly protect you from unwanted calls,{"\n"}
-            SNAPI needs permission to screen incoming numbers.
+            {step.body}
           </Text>
 
-          {/* Trust line (optional but recommended) */}
-          <View style={{ marginTop: 14 }}>
-            <Text
-              style={{
-                color: Colors?.textMuted ?? "rgba(156,163,175,0.95)",
-                fontSize: 12.5,
-                lineHeight: 18,
-              }}
-            >
-              We never listen to your calls — we only act when protection is
-              needed.
-            </Text>
-          </View>
+          <ActionBlock>
+            <PrimaryButton
+              label={step.primary}
+              onPress={handlePrimary}
+            />
+
+            {stepIndex > 0 && (
+              <GhostButton
+                label={step.secondary}
+                onPress={handleSecondary}
+              />
+            )}
+          </ActionBlock>
         </GlassCard>
-
-        {/* Spacer */}
-        <View style={{ flex: 1 }} />
-
-        {/* Bottom action block (dark blue slab) */}
-        <ActionBlock>
-          <PrimaryButton title="Continue" onPress={() => {}} />
-          <GhostButton title="Not now" onPress={() => {}} />
-        </ActionBlock>
       </View>
     </GlassBackground>
   );

@@ -20,3 +20,6 @@ export const Tokens = {
     cyanHover: 0.36,
   },
 } as const;
+
+// DEBUG: prove Tokens is real at runtime
+console.log("TOKENS LOADED", Tokens);
