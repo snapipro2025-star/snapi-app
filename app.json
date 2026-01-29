@@ -3,37 +3,53 @@
     "name": "snapi-app",
     "slug": "snapi-app",
     "version": "1.0.0",
+
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
+
+    "icon": "./assets/icon.png",
+
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#050816"
     },
+
+    "updates": {
+      "enabled": false
+    },
+
     "ios": {
       "supportsTablet": true
     },
+
     "android": {
+      "package": "com.snapi.app",
+
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#050816"
       },
+
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false,
-      "package": "com.snapi.app"
+      "predictiveBackGestureEnabled": false
     },
+
     "web": {
       "favicon": "./assets/favicon.png"
     },
+
     "plugins": [
       "expo-secure-store"
     ],
+
     "extra": {
       "eas": {
         "projectId": "c572a37d-60d8-4bd9-ae9f-c769d7b81f7e"
       }
-    }
+    },
+
+    "owner": "snapi"
   }
 }
