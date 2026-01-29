@@ -1,4 +1,4 @@
-package com.anonymous.snapiapp
+package com.snapi.app
 
 import android.app.Application
 import android.content.res.Configuration

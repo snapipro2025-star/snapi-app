@@ -22,7 +22,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.snapiapp"
+      "package": "com.snapi.app"
     },
     "web": {
       "favicon": "./assets/favicon.png"
