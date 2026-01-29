@@ -1,22 +1,17 @@
 ﻿import React, { useEffect, useRef } from "react";
-import {
-  View,
-  StyleSheet,
-  Animated,
-  AccessibilityInfo,
-  Easing,
-} from "react-native";
+import { View, StyleSheet, Animated, AccessibilityInfo, Easing } from "react-native";
 import GlassBackground from "../components/GlassBackground";
 
 type Props = { onFinish: () => void };
+
+// Fade-in duration (ms)
+const FADE_MS = 650;
 
 export default function SplashScreen({ onFinish }: Props) {
   const imageOpacity = useRef(new Animated.Value(0)).current;
   const done = useRef(false);
 
   useEffect(() => {
-    let timeout: ReturnType<typeof setTimeout> | null = null;
-
     const finish = () => {
       if (done.current) return;
       done.current = true;
@@ -30,30 +25,37 @@ export default function SplashScreen({ onFinish }: Props) {
     AccessibilityInfo.isReduceMotionEnabled()
       .then((reduced) => {
         if (reduced) {
-          imageOpacity.setValue(0.85);
-          timeout = setTimeout(finish, 900);
+          // Respect reduced motion: show immediately, then finish.
+          imageOpacity.setValue(1);
+          finish();
           return;
         }
 
-        // Fade vault in
+        // Fade vault in, then finish (RootNavigator enforces total 4s)
         Animated.timing(imageOpacity, {
-          toValue: 0.5, // vault strength
-          duration: 520,
+          toValue: 1,
+          duration: FADE_MS,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
-        }).start();
-
-        // Hold a bit longer (premium feel)
-        timeout = setTimeout(finish, 1800);
+        }).start(({ finished }) => {
+          if (finished) finish();
+        });
       })
       .catch(() => {
-        imageOpacity.setValue(0.85);
-        timeout = setTimeout(finish, 1800);
+        // Fallback: still animate quickly then finish
+        Animated.timing(imageOpacity, {
+          toValue: 1,
+          duration: FADE_MS,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }).start(({ finished }) => {
+          if (finished) finish();
+        });
       });
 
     return () => {
       done.current = true;
-      if (timeout) clearTimeout(timeout);
+      imageOpacity.stopAnimation();
     };
   }, [onFinish, imageOpacity]);
 
@@ -85,6 +87,7 @@ const styles = StyleSheet.create({
     width: "92%",
     maxWidth: 520,
     aspectRatio: 16 / 9,
+    transform: [{ translateX: 10 }], // ✅ move right
   },
 
   edgeBlend: {

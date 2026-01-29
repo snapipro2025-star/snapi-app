@@ -1,8 +1,16 @@
 ﻿export const Colors = {
   bg: "#050816",
   bg2: "#02040a",
+
+  // Primary text tokens
   text: "#f9fafb",
   muted: "#9ca3af",
+
+  // ✅ Aliases to fix TS errors + legacy usage
+  textPrimary: "#f9fafb", // same as text
+  textMuted: "#9ca3af",   // same as muted
+  subtle: "#cbd5e1",      // soft secondary text (used by onboarding)
+
   border: "rgba(148,163,184,.22)",
 
   accent: "#00e5ff",

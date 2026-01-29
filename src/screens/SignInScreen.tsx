@@ -1,30 +1,14 @@
-import React from "react";
-import { View, Text, StyleSheet } from "react-native";
-import GlassBackground from "../components/GlassBackground";
-import { Colors } from "../theme/colors";
+import React, { useEffect } from "react";
+import { View } from "react-native";
+import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import type { RootStackParamList } from "../navigation/RootNavigator";
 
-export default function SignInScreen() {
-  const textColor = Colors?.text ?? "#FFFFFF";
+type Props = NativeStackScreenProps<RootStackParamList, "SignIn">;
 
-  return (
-    <GlassBackground>
-      <View style={styles.container}>
-        <Text style={[styles.title, { color: textColor }]}>
-          Sign In
-        </Text>
-      </View>
-    </GlassBackground>
-  );
+export default function SignInScreen({ navigation }: Props) {
+  useEffect(() => {
+    navigation.replace("SecureSignIn");
+  }, [navigation]);
+
+  return <View />;
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: "800",
-  },
-});

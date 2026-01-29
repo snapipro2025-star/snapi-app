@@ -1,21 +1,18 @@
-// src/screens/WelcomeScreen.tsx
+﻿// src/screens/WelcomeScreenFixed.tsx
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
-
 import GlassBackground from "../components/GlassBackground";
 import GlassCard from "../components/GlassCard";
 import { PrimaryButton, GhostButton } from "../components/Buttons";
-
 import { Colors } from "../theme/colors";
 import { Tokens } from "../theme/tokens";
-
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Welcome">;
 
-export default function WelcomeScreen({ navigation }: Props) {
+export default function WelcomeScreenFixed({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const padX = Tokens?.pad?.screen ?? 18;
 
@@ -42,16 +39,22 @@ export default function WelcomeScreen({ navigation }: Props) {
         <GlassCard style={styles.systemCard}>
           {/* Header */}
           <View style={styles.headerRow}>
-            <View style={styles.headerLeft}>
+            <View style={{ flex: 1, minWidth: 0 }}>
               <Text
-                style={[styles.title, { color: Colors?.textPrimary ?? "#f9fafb" }]}
+                style={[
+                  styles.title,
+                  { color: Colors?.textPrimary ?? "#f9fafb" },
+                ]}
                 numberOfLines={1}
               >
                 SNAPI live shield
               </Text>
 
               <Text
-                style={[styles.subtitle, { color: Colors?.textMuted ?? "#9ca3af" }]}
+                style={[
+                  styles.subtitle,
+                  { color: Colors?.textMuted ?? "#9ca3af" },
+                ]}
                 numberOfLines={1}
               >
                 Monitoring inbound calls 24/7
@@ -59,39 +62,44 @@ export default function WelcomeScreen({ navigation }: Props) {
             </View>
           </View>
 
-          {/* 3 stat tiles */}
+          {/* Tiles */}
           <View style={styles.tilesRow}>
             <StatTile
               title="Suspicious calls"
               value="98.7%"
               foot="filtered (30d)"
               showDotOnFoot
-              footDotColor={styles.dotAmber.backgroundColor as string}
+              dotColor={Colors?.warn ?? "#f59e0b"} // amber
             />
+
             <StatTile
               title="Verified callers"
               value="+4,120"
               foot="trusted profiles"
               showDotOnFoot
-              footDotColor={styles.dotGreen.backgroundColor as string}
+              dotColor={Colors?.ok ?? "#34d399"}
             />
+
             <StatTile
               title="Time saved"
               value="63 hrs"
               foot="per month*"
               showDotOnFoot
-              footDotColor={styles.dotGreen.backgroundColor as string}
+              dotColor={Colors?.ok ?? "#34d399"}
             />
           </View>
 
           {/* Banner */}
           <View style={styles.banner}>
             <Text
-              style={[styles.bannerText, { color: Colors?.textPrimary ?? "#f9fafb" }]}
+              style={[
+                styles.bannerText,
+                { color: Colors?.textPrimary ?? "#f9fafb" },
+              ]}
               numberOfLines={3}
             >
-              SNAPI routing engine identifies callers, challenges unknown numbers, and
-              passes only the real people through.
+              SNAPI routing engine identifies callers, challenges unknown numbers,
+              and passes only the real people through.
             </Text>
 
             <View style={styles.miniPillsCol}>
@@ -117,27 +125,22 @@ function StatTile({
   value,
   foot,
   showDotOnFoot,
-  footDotColor,
+  dotColor,
 }: {
   title: string;
   value: string;
   foot: string;
   showDotOnFoot?: boolean;
-  footDotColor?: string;
+  dotColor?: string;
 }) {
   return (
     <View style={styles.tile}>
-      <Text style={styles.tileTitle} numberOfLines={2} ellipsizeMode="tail">
+      <Text style={styles.tileTitle} numberOfLines={2}>
         {title}
       </Text>
 
-      <View style={styles.tileBottom}>
-        <Text
-          style={styles.tileValue}
-          numberOfLines={1}
-          adjustsFontSizeToFit
-          minimumFontScale={0.9}
-        >
+      <View style={{ gap: 6 }}>
+        <Text style={styles.tileValue} numberOfLines={1}>
           {value}
         </Text>
 
@@ -146,12 +149,11 @@ function StatTile({
             <View
               style={[
                 styles.tileDot,
-                { backgroundColor: footDotColor ?? styles.dotGreen.backgroundColor },
+                { backgroundColor: dotColor ?? "#34d399" },
               ]}
             />
           ) : null}
-
-          <Text style={styles.tileFoot} numberOfLines={1} ellipsizeMode="tail">
+          <Text style={styles.tileFoot} numberOfLines={1}>
             {foot}
           </Text>
         </View>
@@ -171,10 +173,7 @@ function MiniPill({ label }: { label: string }) {
 }
 
 const styles = StyleSheet.create({
-  page: {
-    flex: 1,
-    backgroundColor: "transparent",
-  },
+  page: { flex: 1, backgroundColor: "transparent" },
 
   systemCard: {
     width: "100%",
@@ -188,22 +187,13 @@ const styles = StyleSheet.create({
 
   headerRow: {
     flexDirection: "row",
-    width: "100%",
     alignItems: "flex-start",
     justifyContent: "space-between",
     gap: 12,
     marginBottom: 12,
   },
-  headerLeft: {
-    flex: 1,
-    minWidth: 0,
-  },
 
-  title: {
-    fontSize: 18,
-    fontWeight: "800",
-    letterSpacing: 0.2,
-  },
+  title: { fontSize: 18, fontWeight: "800", letterSpacing: 0.2 },
 
   subtitle: {
     marginTop: 4,
@@ -214,7 +204,6 @@ const styles = StyleSheet.create({
 
   tilesRow: {
     flexDirection: "row",
-    width: "100%",
     gap: 10,
     marginBottom: 12,
   },
@@ -228,7 +217,8 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(8,14,32,0.55)",
     paddingHorizontal: 10,
     paddingVertical: 10,
-    minHeight: 94,
+    minHeight: 92,
+    justifyContent: "space-between",
   },
 
   tileTitle: {
@@ -236,45 +226,20 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     lineHeight: 14,
     fontWeight: "800",
-    minHeight: 28,
-    marginBottom: 6,
-  },
-
-  tileBottom: {
-    gap: 5,
   },
 
   tileValue: {
     color: "#f9fafb",
     fontSize: 18,
-    fontWeight: "900",
+    fontWeight: "800",
     letterSpacing: 0.2,
   },
 
-  tileFootRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    minWidth: 0,
-  },
+  tileFootRow: { flexDirection: "row", alignItems: "center", gap: 6 },
 
-  tileDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 99,
-  },
-
-  // dot colors (kept as styles so you can tweak once)
-  dotGreen: {
-    backgroundColor: Colors?.ok ?? "#34d399",
-  },
-  dotAmber: {
-    backgroundColor: "rgba(251,191,36,0.95)", // amber (warning/filtered)
-  },
+  tileDot: { width: 8, height: 8, borderRadius: 99 },
 
   tileFoot: {
-    flex: 1,
-    minWidth: 0,
     color: "rgba(156,163,175,0.95)",
     fontSize: 11.5,
     fontWeight: "600",
@@ -292,19 +257,9 @@ const styles = StyleSheet.create({
     gap: 12,
   },
 
-  bannerText: {
-    flex: 1,
-    minWidth: 0,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "600",
-  },
+  bannerText: { flex: 1, fontSize: 13, lineHeight: 18, fontWeight: "600" },
 
-  miniPillsCol: {
-    gap: 8,
-    alignItems: "flex-end",
-    flexShrink: 0,
-  },
+  miniPillsCol: { gap: 8, alignItems: "flex-end", flexShrink: 0 },
 
   miniPill: {
     paddingHorizontal: 12,
@@ -315,19 +270,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(8,14,32,0.45)",
   },
 
-  miniPillText: {
-    color: "#f9fafb",
-    fontSize: 12,
-    fontWeight: "800",
-  },
+  miniPillText: { color: "#f9fafb", fontSize: 12, fontWeight: "800" },
 
-  actions: {
-    gap: 12,
-  },
+  actions: { gap: 12 },
 });
-
-// write-test
-
-// write-test
-
-// write-test 2026-01-25T11:30:26.7442951-07:00
