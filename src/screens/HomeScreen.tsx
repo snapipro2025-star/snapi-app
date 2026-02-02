@@ -179,20 +179,24 @@ export default function HomeScreen({ navigation }: any) {
     try {
       setRefreshing(true);
 
-      const r = await apiFetch("/mobile/refresh", { method: "GET" });
+      const [mobileRes, recentRes] = await Promise.allSettled([
+        apiFetch("/mobile/refresh", { method: "GET" }),
+        apiFetch("/app/api/recent", { method: "GET" }),
+      ]);
 
-      setEnabled(Boolean(r?.enabled ?? r?.protectionEnabled ?? true));
-      setSpamOn(Boolean(r?.spamOn ?? r?.spam ?? true));
-      setUnknownOn(Boolean(r?.unknownOn ?? r?.unknown ?? true));
-      setVoicemailOn(Boolean(r?.voicemailOn ?? r?.voicemail ?? true));
+      // --- Settings / toggles (mobile API) ---
+      if (mobileRes.status === "fulfilled") {
+        const rMobile = mobileRes.value;
+        setEnabled(Boolean(rMobile?.enabled ?? rMobile?.protectionEnabled ?? true));
+        setSpamOn(Boolean(rMobile?.spamOn ?? rMobile?.spam ?? true));
+        setUnknownOn(Boolean(rMobile?.unknownOn ?? rMobile?.unknown ?? true));
+        setVoicemailOn(Boolean(rMobile?.voicemailOn ?? rMobile?.voicemail ?? true));
+      }
 
-      const items: RecentItem[] = Array.isArray(r?.recent)
-        ? r.recent
-        : Array.isArray(r?.calls)
-        ? r.calls
-        : [];
+      // --- Recent calls (app API) ---
+      const rRecent = recentRes.status === "fulfilled" ? recentRes.value : [];
+      const items: RecentItem[] = Array.isArray(rRecent) ? rRecent : [];
 
-      // Condensed plan: up to 25 calls (deduped newest per callSid)
       const unique = dedupeRecent(items);
       setRecent(unique.slice(0, 25));
     } catch (e: any) {
@@ -378,6 +382,7 @@ export default function HomeScreen({ navigation }: any) {
                   const top = callerIdLine(it);
                   const bottom = phoneLine(it);
                   const callSid = bestCallSid(it);
+                  const showBlocked = Boolean(it?.blocked);
 
                   return (
                     <View key={itemKey(it, idx)} style={styles.row}>
@@ -391,15 +396,28 @@ export default function HomeScreen({ navigation }: any) {
                             </Text>
 
                             {bottom ? (
+                              <View style={styles.phoneRow}>
+                                <Text style={styles.rowBottomLine} numberOfLines={1}>
+                                  {bottom}
+                                </Text>
+
+                                {showBlocked ? (
+                                  <Text style={styles.rowBottomLine} numberOfLines={1}>
+                                    {"  "}Blocked
+                                  </Text>
+                                ) : null}
+                              </View>
+                            ) : showBlocked ? (
+                              // If no phone line, still show Blocked on the second line
                               <Text style={styles.rowBottomLine} numberOfLines={1}>
-                                {bottom}
+                                Blocked
                               </Text>
                             ) : null}
                           </View>
                         </View>
 
                         <Pressable
-                          style={styles.viewBtn}
+                          style={[styles.viewBtn, styles.viewBtnRaised]}
                           onPress={() =>
                             navigation?.navigate?.("CallDetails", {
                               item: it,
@@ -618,6 +636,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
 
+  phoneRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+  },
+
   // mini button that matches Refresh styling language
   viewBtn: {
     paddingHorizontal: 10,
@@ -627,6 +651,13 @@ const styles = StyleSheet.create({
     borderColor: "rgba(0,229,255,0.30)",
     backgroundColor: "rgba(0,229,255,0.08)",
   },
+
+  // ✅ raises the View button slightly
+  viewBtnRaised: {
+    alignSelf: "flex-start",
+    marginTop: 2, // smaller = higher; tweak 0..4 to taste
+  },
+
   viewBtnText: {
     color: Colors.text,
     fontWeight: "800",

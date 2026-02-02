@@ -1,4 +1,5 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+// src/screens/CallHistoryScreen.tsx
+import React, { useCallback, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -17,11 +18,19 @@ import { Colors } from "../theme/colors";
 import { apiFetch } from "../api/client";
 
 type RecentItem = {
-  id: string;
+  id?: string;
+
+  // backend commonly provides callSid + ts
+  callSid?: string;
+  ts?: string; // ISO
+  at?: string; // ISO (legacy)
+
   from?: string;
   name?: string;
-  at?: string; // ISO
-  risk?: number; // 0..100
+
+  // risk may be number or string like "low"/"high" depending on older records
+  risk?: number | string;
+
   transcript?: string;
   voicemailUrl?: string;
   blocked?: boolean;
@@ -29,6 +38,20 @@ type RecentItem = {
 
 function clamp(n: number, a: number, b: number) {
   return Math.max(a, Math.min(b, n));
+}
+
+function normalizeRisk(risk: RecentItem["risk"]): number {
+  if (typeof risk === "number" && Number.isFinite(risk)) return clamp(risk, 0, 100);
+  const s = String(risk || "").toLowerCase().trim();
+  if (!s) return 0;
+
+  // handle simple labels seen in some records
+  if (s === "low") return 15;
+  if (s === "medium" || s === "med") return 55;
+  if (s === "high") return 85;
+
+  const n = Number(s);
+  return Number.isFinite(n) ? clamp(n, 0, 100) : 0;
 }
 
 function riskDotColor(risk: number) {
@@ -41,8 +64,11 @@ function riskDotColor(risk: number) {
 function fmtWhen(iso?: string) {
   if (!iso) return "";
   const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+
   const now = new Date();
   const diff = Math.floor((now.getTime() - d.getTime()) / 1000);
+  if (diff < 0) return "just now";
   if (diff < 60) return `${diff}s ago`;
   const m = Math.floor(diff / 60);
   if (m < 60) return `${m}m ago`;
@@ -50,6 +76,18 @@ function fmtWhen(iso?: string) {
   if (h < 24) return `${h}h ago`;
   const days = Math.floor(h / 24);
   return `${days}d ago`;
+}
+
+function getWhenField(it: RecentItem) {
+  return it.at || it.ts || "";
+}
+
+function getStableKey(it: RecentItem, idx: number) {
+  return (
+    it.id ||
+    it.callSid ||
+    `${it.from || "unknown"}:${getWhenField(it) || "na"}:${idx}`
+  );
 }
 
 export default function CallHistoryScreen({ navigation }: any) {
@@ -65,14 +103,9 @@ export default function CallHistoryScreen({ navigation }: any) {
     try {
       setRefreshing(true);
 
-      // Reuse your refresh endpoint
-      const r = await apiFetch("/mobile/refresh", { method: "GET" });
-
-      const list: RecentItem[] = Array.isArray(r?.recent)
-        ? r.recent
-        : Array.isArray(r?.calls)
-        ? r.calls
-        : [];
+      // ✅ Canonical recent calls endpoint (returns ARRAY)
+      const rRecent = await apiFetch("/app/api/recent", { method: "GET" });
+      const list: RecentItem[] = Array.isArray(rRecent) ? rRecent : [];
 
       // For now: last 10. Later: last 50 + pagination.
       setItems(list.slice(0, 10));
@@ -85,9 +118,16 @@ export default function CallHistoryScreen({ navigation }: any) {
 
   const toggleBlock = useCallback(async (item: RecentItem) => {
     const next = !item.blocked;
+
     setItems((prev) =>
-      prev.map((x) => (x.id === item.id ? { ...x, blocked: next } : x))
+      prev.map((x) =>
+        (x.id && item.id && x.id === item.id) ||
+        (x.callSid && item.callSid && x.callSid === item.callSid)
+          ? { ...x, blocked: next }
+          : x
+      )
     );
+
     try {
       await apiFetch("/app/api/block", {
         method: "POST",
@@ -96,7 +136,12 @@ export default function CallHistoryScreen({ navigation }: any) {
       });
     } catch {
       setItems((prev) =>
-        prev.map((x) => (x.id === item.id ? { ...x, blocked: !next } : x))
+        prev.map((x) =>
+          (x.id && item.id && x.id === item.id) ||
+          (x.callSid && item.callSid && x.callSid === item.callSid)
+            ? { ...x, blocked: !next }
+            : x
+        )
       );
       Alert.alert("Could not update", "Try again.");
     }
@@ -124,10 +169,16 @@ export default function CallHistoryScreen({ navigation }: any) {
       <View
         style={[
           styles.safe,
-          { paddingTop: Math.max(insets.top, 10), paddingBottom: Math.max(insets.bottom, 10) },
+          {
+            paddingTop: Math.max(insets.top, 10),
+            paddingBottom: Math.max(insets.bottom, 10),
+          },
         ]}
       >
-        <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={styles.container}
+          showsVerticalScrollIndicator={false}
+        >
           <View style={styles.header}>
             <Text style={styles.title}>Call History</Text>
             <View style={styles.headerRight}>
@@ -160,14 +211,14 @@ export default function CallHistoryScreen({ navigation }: any) {
               </View>
             ) : (
               <View style={styles.list}>
-                {items.map((it) => {
-                  const risk = it.risk ?? 0;
+                {items.map((it, idx) => {
+                  const risk = normalizeRisk(it.risk);
                   const dot = riskDotColor(risk);
                   const who = it.name || it.from || "Unknown";
-                  const when = fmtWhen(it.at);
+                  const when = fmtWhen(getWhenField(it));
 
                   return (
-                    <View key={it.id} style={styles.row}>
+                    <View key={getStableKey(it, idx)} style={styles.row}>
                       <View style={styles.rowTop}>
                         <View style={styles.rowLeft}>
                           <View style={[styles.dot, { backgroundColor: dot }]} />
@@ -237,7 +288,13 @@ const styles = StyleSheet.create({
   safe: { flex: 1 },
   container: { paddingHorizontal: 16, paddingBottom: 18, gap: 10 },
 
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, paddingHorizontal: 6 },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    paddingHorizontal: 6,
+  },
   title: { fontSize: 22, fontWeight: "900", color: Colors.text },
   headerRight: { flexShrink: 0 },
 
@@ -249,7 +306,12 @@ const styles = StyleSheet.create({
     borderColor: "rgba(0,229,255,0.30)",
   },
 
-  loadingRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 6 },
+  loadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 6,
+  },
   loadingText: { color: Colors.muted, fontSize: 12 },
 
   card: { paddingHorizontal: 14, paddingBottom: 14, paddingTop: 12 },
@@ -267,20 +329,42 @@ const styles = StyleSheet.create({
     padding: 12,
   },
 
-  rowTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  rowTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
   rowLeft: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
 
   dot: { width: 10, height: 10, borderRadius: 99 },
   rowTitle: { color: Colors.text, fontWeight: "800", fontSize: 13 },
   rowMeta: { marginTop: 2, color: Colors.muted, fontSize: 11 },
 
-  transcript: { marginTop: 10, color: Colors.text, fontSize: 12, lineHeight: 16, opacity: 0.92 },
+  transcript: {
+    marginTop: 10,
+    color: Colors.text,
+    fontSize: 12,
+    lineHeight: 16,
+    opacity: 0.92,
+  },
   transcriptEmpty: { marginTop: 10, color: Colors.muted, fontSize: 12, lineHeight: 16 },
 
-  rowActions: { marginTop: 10, flexDirection: "row", justifyContent: "space-between", gap: 10 },
+  rowActions: {
+    marginTop: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 10,
+  },
 
   blockBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1 },
-  blockBtnOn: { borderColor: "rgba(72,255,160,0.35)", backgroundColor: "rgba(72,255,160,0.08)" },
-  blockBtnOff: { borderColor: "rgba(255,72,72,0.35)", backgroundColor: "rgba(255,72,72,0.08)" },
+  blockBtnOn: {
+    borderColor: "rgba(72,255,160,0.35)",
+    backgroundColor: "rgba(72,255,160,0.08)",
+  },
+  blockBtnOff: {
+    borderColor: "rgba(255,72,72,0.35)",
+    backgroundColor: "rgba(255,72,72,0.08)",
+  },
   blockBtnText: { color: Colors.text, fontWeight: "900", fontSize: 11 },
 });

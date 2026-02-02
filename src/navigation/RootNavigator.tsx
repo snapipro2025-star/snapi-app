@@ -7,6 +7,9 @@ import SplashScreen from "../screens/SplashScreen";
 import WelcomeScreen from "../screens/WelcomeScreen";
 import OnboardingScreen from "../screens/OnboardingScreen";
 
+import FirstTimeSetupScreen from "../screens/FirstTimeSetupScreen";
+import SetupFinalScreen from "../screens/setup/SetupFinalScreen";
+
 import SecureSignInScreen from "../screens/auth/SecureSignInScreen";
 import SecurePhoneScreen from "../screens/auth/SecurePhoneScreen";
 import SecureOtpScreen from "../screens/auth/SecureOtpScreen";
@@ -18,11 +21,15 @@ import CallDetailsScreen from "../screens/CallDetailsScreen";
 import CallHistoryScreen from "../screens/CallHistoryScreen";
 
 import { isOnboardingComplete } from "../lib/onboarding";
+import { isSetupComplete } from "../lib/setup";
 
 export type RootStackParamList = {
   Splash: undefined;
   Welcome: undefined;
   Onboarding: undefined;
+
+  FirstTimeSetup: undefined;
+  SetupFinal: undefined;
 
   SecureSignIn: undefined;
   SecurePhone: undefined;
@@ -68,25 +75,36 @@ function SplashGate({ navigation }: SplashProps) {
         const remaining = Math.max(0, 4000 - (Date.now() - t0));
         setTimeout(() => {
           try {
-            // Use replace so users can't "go back" to splash
             navigation.replace(route as any);
           } catch {}
         }, remaining);
       };
 
       try {
+        // 1) Onboarding gate (always first)
         const completed = await isOnboardingComplete();
-
-        // If onboarding not complete -> Welcome first (always)
         if (!completed) {
           replaceOnce("Welcome");
           return;
         }
 
-        // Onboarding complete -> go straight to Home if authed notice from Splash boot
-        replaceOnce(authed ? "Home" : "SecureSignIn");
+        // 2) Setup gate (before auth)
+        const setupDone = await isSetupComplete();
+        if (!setupDone) {
+          replaceOnce("FirstTimeSetup");
+          return;
+        }
+
+        // 3) Setup done -> if authed, go home
+        if (authed) {
+          replaceOnce("Home");
+          return;
+        }
+
+        // 4) Not authed -> secure sign-in
+        replaceOnce("SecureSignIn");
       } catch {
-        // Safe fallback: Welcome (so user isn't blocked)
+        // Safe fallback: never block user
         replaceOnce("Welcome");
       }
     },
@@ -111,6 +129,9 @@ export default function RootNavigator() {
 
       <Stack.Screen name="Welcome" component={WelcomeScreen} options={{ animation: "none" }} />
       <Stack.Screen name="Onboarding" component={OnboardingScreen} options={{ animation: "slide_from_right" }} />
+
+      <Stack.Screen name="FirstTimeSetup" component={FirstTimeSetupScreen} options={{ animation: "fade" }} />
+      <Stack.Screen name="SetupFinal" component={SetupFinalScreen} options={{ animation: "fade" }} />
 
       <Stack.Screen name="SecureSignIn" component={SecureSignInScreen} options={{ animation: "none" }} />
       <Stack.Screen name="SecurePhone" component={SecurePhoneScreen} options={{ animation: "fade" }} />

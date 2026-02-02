@@ -12,6 +12,8 @@ import {
 } from "react-native";
 
 import * as SecureStore from "expo-secure-store";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 
 import GlassBackground from "../../components/GlassBackground";
 import GlassCard from "../../components/GlassCard";
@@ -20,25 +22,19 @@ import { PrimaryButton, GhostButton } from "../../components/Buttons";
 import { Colors } from "../../theme/colors";
 import { Tokens } from "../../theme/tokens";
 
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
-
 import { apiFetch } from "../../api/client";
 
 type Props = NativeStackScreenProps<RootStackParamList, "SecureSignIn">;
 
 const LAST_PHONE_KEY = "snapi.last_phone_e164";
-
-// Match your existing token keys (from earlier code)
-const ACCESS_KEY = "snapi_access_token";
-const REFRESH_KEY = "snapi_refresh_token";
+const PLACEHOLDER_US = "(303) 555-1212";
+const PLACEHOLDER_INTL = "+44 20 7946 0958";
 
 /**
- * UX rule:
- * - Allow any accidental typing: with/without +1, dashes, spaces, parentheses
- * - If user explicitly starts with "+", respect their country code
- * - Otherwise assume US and normalize to +1XXXXXXXXXX (only becomes "valid" at 10 digits)
+ * Normalization:
+ * - If user starts with "+": keep any country code, strip non-digits after "+"
+ * - Otherwise: assume US only when 10 digits (or 11 digits starting with 1)
  */
 function normalizePhone(raw: string) {
   const s = String(raw || "").trim();
@@ -49,24 +45,20 @@ function normalizePhone(raw: string) {
   }
 
   const digits = s.replace(/\D/g, "");
-
   if (digits.length === 11 && digits.startsWith("1")) return `+1${digits.slice(1)}`;
   if (digits.length === 10) return `+1${digits}`;
-
   return "";
 }
 
 function pickErrorMessage(err: any) {
   const msg = String(err?.message || "");
   const status = Number(err?.status || err?.statusCode || 0);
-
-  if (!msg) return "Please try again.";
-
   const m = msg.toLowerCase();
+
   if (status === 429 || m.includes("too many")) return "Too many attempts. Please wait and try again.";
   if (m.includes("invalid") || m.includes("phone")) return "That phone number looks invalid. Please double-check.";
   if (m.includes("network") || m.includes("fetch") || m.includes("reachable")) return "Network issue. Please try again.";
-  return msg;
+  return msg || "Please try again.";
 }
 
 export default function SecurePhoneScreen({ navigation }: Props) {
@@ -76,17 +68,12 @@ export default function SecurePhoneScreen({ navigation }: Props) {
   const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Load last phone (optional UX win)
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
         const last = await SecureStore.getItemAsync(LAST_PHONE_KEY);
-        if (mounted && last) {
-          // show prettified-ish input: keep as digits for easier edits
-          // (user can still type any format; normalize handles it)
-          setPhone(last);
-        }
+        if (mounted && last) setPhone(last);
       } catch {}
     })();
     return () => {
@@ -94,31 +81,47 @@ export default function SecurePhoneScreen({ navigation }: Props) {
     };
   }, []);
 
+  const isTypingIntl = useMemo(() => String(phone || "").trim().startsWith("+"), [phone]);
   const e164 = useMemo(() => normalizePhone(phone), [phone]);
-  const looksValid = e164.startsWith("+1") && e164.length === 12; // +1 + 10 digits
 
-  const inputBorder = looksValid
-    ? "rgba(16,185,129,0.45)"
-    : (Colors as any)?.border ?? "rgba(148,163,184,0.22)";
+  // Validation rules:
+  // - US mode: require exactly 10 digits (normalized to +1XXXXXXXXXX)
+  // - Intl mode: allow any E.164-ish length (min 8 digits total, max 15 per spec)
+  const looksValidUS = e164.startsWith("+1") && e164.length === 12; // +1 + 10 digits
+  const intlDigits = useMemo(() => (e164.startsWith("+") ? e164.slice(1).replace(/\D/g, "") : ""), [e164]);
+  const looksValidIntl = isTypingIntl && intlDigits.length >= 8 && intlDigits.length <= 15;
 
-  const inputBg =
-    (Colors as any)?.inputBg ?? "rgba(8,14,32,0.55)";
+  const looksValid = isTypingIntl ? looksValidIntl : looksValidUS;
 
-  const glassBg =
-    (Colors as any)?.glassCard ?? "rgba(11,21,48,0.30)";
+  const borderDefault = (Colors as any)?.border ?? "rgba(148,163,184,0.22)";
+  const textDefault = (Colors as any)?.text ?? "#f9fafb";
+  const mutedDefault = (Colors as any)?.muted ?? "#9ca3af";
+
+  const inputBorder = looksValid ? "rgba(16,185,129,0.45)" : borderDefault;
+  const inputBg = (Colors as any)?.inputBg ?? "rgba(8,14,32,0.55)";
+  const glassBg = (Colors as any)?.glassCard ?? "rgba(11,21,48,0.30)";
+
+  const hintText = isTypingIntl
+    ? "International supported — start with + and include your country code."
+    : "Enter your 10-digit US number to receive your verification code.";
+
+  const placeholder = isTypingIntl ? PLACEHOLDER_INTL : PLACEHOLDER_US;
 
   async function requestCode() {
     if (loading) return;
 
     if (!looksValid) {
-      Alert.alert("Enter your phone number", "Please enter a 10-digit US number.");
+      Alert.alert(
+        "Enter your phone number",
+        isTypingIntl
+          ? "Please enter your full number starting with + and a valid country code."
+          : "Please enter a 10-digit US number."
+      );
       return;
     }
 
     try {
       setLoading(true);
-
-      // store last phone for convenience
       await SecureStore.setItemAsync(LAST_PHONE_KEY, e164).catch(() => {});
 
       const r = await apiFetch("/mobile/auth/otp/start", {
@@ -140,57 +143,41 @@ export default function SecurePhoneScreen({ navigation }: Props) {
     }
   }
 
-  async function devSkipLogin() {
-    try {
-      setLoading(true);
-      await SecureStore.setItemAsync(ACCESS_KEY, "DEV_TOKEN");
-      await SecureStore.setItemAsync(REFRESH_KEY, "DEV_REFRESH");
-      navigation.replace("Home");
-    } catch {
-      Alert.alert("Dev login failed", "Could not store dev tokens.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
   return (
     <GlassBackground>
       <KeyboardAvoidingView
-        style={{ flex: 1 }}
+        style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
       >
         <ScrollView
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{
-            flexGrow: 1,
-            paddingTop: Math.max(insets.top + 12, 16),
-            paddingBottom: Math.max(insets.bottom + 16, 16),
-            paddingHorizontal: padX,
-            justifyContent: "flex-start",
-          }}
+          contentContainerStyle={[
+            styles.scrollContent,
+            {
+              paddingTop: Math.max(insets.top + 12, 16),
+              paddingBottom: Math.max(insets.bottom + 16, 16),
+              paddingHorizontal: padX,
+            },
+          ]}
         >
-          <View style={{ width: "100%", maxWidth: 520, alignSelf: "center" }}>
-            <GlassCard style={[styles.card, { borderColor: (Colors as any)?.border ?? "rgba(148,163,184,0.22)", backgroundColor: glassBg }]}>
-              <Text style={[styles.kicker, { color: (Colors as any)?.muted ?? "#9ca3af" }]}>
-                PHONE VERIFICATION
-              </Text>
+          <View style={styles.shell}>
+            <GlassCard style={[styles.card, { borderColor: borderDefault, backgroundColor: glassBg }]}>
+              <Text style={[styles.kicker, { color: mutedDefault }]}>PHONE VERIFICATION</Text>
 
-              <Text style={[styles.title, { color: (Colors as any)?.text ?? "#f9fafb" }]}>
-                Enter your phone
-              </Text>
+              <Text style={[styles.title, { color: textDefault }]}>Enter your phone</Text>
 
-              <Text style={[styles.sub, { color: (Colors as any)?.muted ?? "#9ca3af" }]}>
+              <Text style={[styles.sub, { color: mutedDefault }]}>
                 We’ll verify your number with a secure one-time code.
               </Text>
 
-              <View style={{ height: 16 }} />
+              <View style={styles.sp16} />
 
               <TextInput
                 value={phone}
                 onChangeText={setPhone}
-                placeholder="(303) 555-1212"
+                placeholder={placeholder}
                 placeholderTextColor="rgba(148,163,184,0.65)"
                 keyboardType="phone-pad"
                 autoComplete="tel"
@@ -199,43 +186,22 @@ export default function SecurePhoneScreen({ navigation }: Props) {
                 style={[
                   styles.input,
                   {
-                    color: (Colors as any)?.text ?? "#f9fafb",
+                    color: textDefault,
                     borderColor: inputBorder,
                     backgroundColor: inputBg,
                   },
                 ]}
               />
 
-              <Text style={[styles.hint, { color: (Colors as any)?.muted ?? "#9ca3af" }]}>
-                Enter your 10-digit US number to receive your verification code.
-              </Text>
+              <Text style={[styles.hint, { color: mutedDefault }]}>{hintText}</Text>
 
-              <View style={{ height: 18 }} />
+              <View style={styles.sp18} />
 
-              <PrimaryButton
-                title={loading ? "Sending..." : "Send Code"}
-                onPress={requestCode}
-                disabled={loading}
-              />
+              <PrimaryButton title={loading ? "Sending..." : "Send Code"} onPress={requestCode} disabled={loading} />
 
-              <View style={{ height: 10 }} />
+              <View style={styles.sp10} />
 
-              <GhostButton
-                title="Back"
-                onPress={() => navigation.goBack()}
-                disabled={loading}
-              />
-
-              {__DEV__ ? (
-                <>
-                  <View style={{ height: 10 }} />
-                  <GhostButton
-                    title={loading ? "Please wait..." : "DEV: Skip Login"}
-                    onPress={devSkipLogin}
-                    disabled={loading}
-                  />
-                </>
-              ) : null}
+              <GhostButton title="Back" onPress={() => navigation.goBack()} disabled={loading} />
             </GlassCard>
           </View>
         </ScrollView>
@@ -245,11 +211,25 @@ export default function SecurePhoneScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
+
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: "flex-start",
+  },
+
+  shell: {
+    width: "100%",
+    maxWidth: 520,
+    alignSelf: "center",
+  },
+
   card: {
     padding: 18,
     borderRadius: 26,
     borderWidth: 1,
   },
+
   kicker: {
     textTransform: "uppercase",
     letterSpacing: 2.2,
@@ -259,6 +239,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     includeFontPadding: false,
   },
+
   title: {
     fontSize: 22,
     fontWeight: "900",
@@ -266,12 +247,14 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     includeFontPadding: false,
   },
+
   sub: {
     fontSize: 14.5,
     lineHeight: 20,
     fontWeight: "600",
     opacity: 0.9,
   },
+
   input: {
     borderWidth: 1,
     borderRadius: 16,
@@ -280,10 +263,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
   },
+
   hint: {
     marginTop: 10,
     fontSize: 12.5,
     fontWeight: "600",
     opacity: 0.9,
   },
+
+  sp10: { height: 10 },
+  sp16: { height: 16 },
+  sp18: { height: 18 },
 });
