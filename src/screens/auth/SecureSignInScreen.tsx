@@ -28,8 +28,34 @@ import { apiFetch } from "../../api/client";
 type Props = NativeStackScreenProps<RootStackParamList, "SecureSignIn">;
 
 const LAST_PHONE_KEY = "snapi.last_phone_e164";
+const LAST_TZ_KEY = "snapi.last_tz_iana";
 const PLACEHOLDER_US = "(303) 555-1212";
 const PLACEHOLDER_INTL = "+44 20 7946 0958";
+
+/**
+ * Device timezone (IANA), e.g. "America/Denver".
+ * Safe fallback to last saved, then "UTC".
+ */
+async function getDeviceTimeZone(): Promise<string> {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (typeof tz === "string" && tz.trim().length > 0) {
+      await SecureStore.setItemAsync(LAST_TZ_KEY, tz).catch(() => {});
+      return tz;
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    const last = await SecureStore.getItemAsync(LAST_TZ_KEY);
+    if (last) return last;
+  } catch {
+    // ignore
+  }
+
+  return "UTC";
+}
 
 /**
  * Normalization:
@@ -122,12 +148,20 @@ export default function SecurePhoneScreen({ navigation }: Props) {
 
     try {
       setLoading(true);
+
+      // Best-effort cache phone
       await SecureStore.setItemAsync(LAST_PHONE_KEY, e164).catch(() => {});
+
+      // ✅ Capture timezone now (per-device, per-user)
+      const timezone = await getDeviceTimeZone();
 
       const r = await apiFetch("/mobile/auth/otp/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: e164 }),
+        body: JSON.stringify({
+          phone: e164,
+          timezone, // ✅ backend can store this for later SMS formatting
+        }),
       });
 
       if (r?.ok === false) {

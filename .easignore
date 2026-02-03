@@ -1,0 +1,13 @@
+**/.git
+**/.DS_Store
+**/node_modules
+**/.expo
+**/.expo-shared
+
+**/android/.gradle
+**/android/build
+**/android/app/build
+
+**/ios/build
+**/coverage
+**/*.log

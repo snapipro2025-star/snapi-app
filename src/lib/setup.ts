@@ -20,3 +20,16 @@ export async function setSetupComplete(done: boolean): Promise<void> {
     // ignore
   }
 }
+
+// src/lib/timezone.ts
+export function getDeviceTimeZone(): string {
+  // Expo / Hermes supports this on modern RN.
+  // Returns IANA tz like "America/Denver"
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof tz === "string" && tz.length ? tz : "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
