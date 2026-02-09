@@ -11,12 +11,13 @@ class SnapiCallScreeningService : CallScreeningService() {
       val incoming = callDetails.handle?.schemeSpecificPart ?: ""
       Log.i("SNAPI-CS", "onScreenCall incoming=$incoming")
 
-      // Minimal allow-through response (proves role + service work)
+      // ✅ Silent intercept (test mode)
       val response = CallResponse.Builder()
         .setDisallowCall(false)
         .setRejectCall(false)
+        .setSilenceCall(true)
         .setSkipCallLog(false)
-        .setSkipNotification(false)
+        .setSkipNotification(true)
         .build()
 
       respondToCall(callDetails, response)
