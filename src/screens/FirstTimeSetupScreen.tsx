@@ -26,25 +26,10 @@ export default function FirstTimeSetupScreen({ navigation }: Props) {
     if (loading) return;
     try {
       setLoading(true);
-      // Step flow: FirstTimeSetup -> SetupFinal (required checkbox) -> SecureSignIn
+      // Step flow: FirstTimeSetup -> SetupFinal (required checkbox) -> SecurePhone
       navigation.navigate("SetupFinal");
     } catch {
-      Alert.alert("Setup", "Could not start setup. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function alreadyDone() {
-    if (loading) return;
-    try {
-      setLoading(true);
-      // Temporary escape hatch (until we enforce checks):
-      // marks setup complete and proceeds to secure sign-in.
-      await setSetupComplete(true);
-      navigation.replace("SecureSignIn");
-    } catch {
-      Alert.alert("Setup", "Could not save setup state. Please try again.");
+      Alert.alert("Couldn't open settings", "Please open your phone settings and enable notifications for SNAPI.");
     } finally {
       setLoading(false);
     }
@@ -110,16 +95,6 @@ export default function FirstTimeSetupScreen({ navigation }: Props) {
                 onPress={startSetup}
                 disabled={loading}
               />
-
-              <View style={{ height: 10 }} />
-
-              <GhostButton
-                title={loading ? "Please wait..." : "I already did this"}
-                onPress={alreadyDone}
-                disabled={loading}
-              />
-
-              <View style={{ height: 10 }} />
 
               <GhostButton title="Back" onPress={() => navigation.goBack()} disabled={loading} />
 

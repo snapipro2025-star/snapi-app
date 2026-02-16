@@ -1,5 +1,5 @@
-// src/screens/HomeScreen.tsx
-import React, { useCallback, useMemo, useRef, useState } from "react";
+// src/screens/HomeScreen.tsx  (updated section)
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -10,6 +10,9 @@ import {
   Alert,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+
+import { syncContactsAllowlistIfNeeded } from "../lib/allowlistSync";
 
 import GlassBackground from "../components/GlassBackground";
 import GlassCard from "../components/GlassCard";
@@ -19,20 +22,34 @@ import { Colors } from "../theme/colors";
 import { apiFetch } from "../api/client";
 
 type RecentItem = {
-  id?: string; // may be callSid or custom
+  id?: string;
   callSid?: string;
 
-  from?: string; // raw E164 (ex: +1720...)
-  fromDisplay?: string; // pretty (optional)
-  name?: string; // person name (optional)
-  business?: string; // business name (optional)
+  from?: string;
+  fromDisplay?: string;
+  name?: string;
+  business?: string;
 
-  privateNumber?: boolean; // optional hint
-  at?: string; // ISO
-  ts?: string; // ISO
-  risk?: number; // 0..100
+  privateNumber?: boolean;
+  at?: string;
+  ts?: string;
+
+  risk?: number | string;
+
   voicemailUrl?: string;
+  recordingUrl?: string;
+
   blocked?: boolean;
+
+  // server-driven status/action fields
+  status?: string;
+  action?: string;
+  decision?: string;
+  source?: string;
+  device?: string;
+
+  allowlisted?: boolean;
+  allowed?: boolean;
 };
 
 function clamp(n: number, a: number, b: number) {
@@ -40,22 +57,50 @@ function clamp(n: number, a: number, b: number) {
 }
 
 /**
- * Risk dot ONLY (no labels). Tune thresholds later.
+ * Phase B status dot (LOCKED):
+ * 🔴 Blocked
+ * 🟢 Allowed/Trusted (allowlisted)
+ * 🟡 Unknown/Intercepted (default)
  */
-function riskDotColor(risk: number) {
-  const r = clamp(Number(risk || 0), 0, 100);
-  if (r >= 75) return "rgba(255, 72, 72, 0.95)";
-  if (r >= 45) return "rgba(255, 196, 72, 0.95)";
+function statusDotEmoji(it: RecentItem) {
+  if (it?.blocked) return "🔴";
+
+  const action = String((it as any)?.action || "").toLowerCase().trim();
+  const decision = String((it as any)?.decision || "").toLowerCase().trim();
+  const status = String((it as any)?.status || "").toLowerCase().trim();
+
+  const allowlisted =
+    Boolean((it as any)?.allowlisted) ||
+    Boolean((it as any)?.allowed) ||
+    action === "allow" ||
+    decision.includes("allow") ||
+    status.includes("allowed");
+
+  return allowlisted ? "🟢" : "🟡";
+}
+
+// Kept for later Phase C/UX tuning; not used for dot in Phase B
+function riskDotColor(risk: number | string) {
+  const n = typeof risk === "number" ? risk : Number(risk);
+  if (Number.isFinite(n)) {
+    const r = clamp(n, 0, 100);
+    if (r >= 75) return "rgba(255, 72, 72, 0.95)";
+    if (r >= 45) return "rgba(255, 196, 72, 0.95)";
+    return "rgba(72, 255, 160, 0.95)";
+  }
+
+  const s = String(risk || "").toLowerCase().trim();
+  if (s === "high") return "rgba(255, 72, 72, 0.95)";
+  if (s === "medium" || s === "med") return "rgba(255, 196, 72, 0.95)";
+  if (s === "low") return "rgba(72, 255, 160, 0.95)";
   return "rgba(72, 255, 160, 0.95)";
 }
 
-/** Format E164-ish into "+1 720-600-2937" (US-only pretty) */
 function formatUSPretty(raw?: string) {
   const s = String(raw || "").trim();
   if (!s) return "";
   const digits = s.replace(/[^\d]/g, "");
 
-  // 11 digits starting with 1
   if (digits.length === 11 && digits.startsWith("1")) {
     const a = digits.slice(1, 4);
     const b = digits.slice(4, 7);
@@ -63,7 +108,6 @@ function formatUSPretty(raw?: string) {
     return `+1 ${a}-${b}-${c}`;
   }
 
-  // 10 digits
   if (digits.length === 10) {
     const a = digits.slice(0, 3);
     const b = digits.slice(3, 6);
@@ -74,11 +118,10 @@ function formatUSPretty(raw?: string) {
   return s;
 }
 
-/**
- * Caller ID definition (your rule):
- * One of: Person name, Business name, Private Number, Unknown Caller
- */
 function callerIdLine(it: RecentItem) {
+  const status = String((it as any)?.status || "").trim();
+  if (status) return status;
+
   const person = String(it?.name || "").trim();
   if (person) return person;
 
@@ -86,75 +129,61 @@ function callerIdLine(it: RecentItem) {
   if (biz) return biz;
 
   if (it?.privateNumber) return "Private Number";
-
   return "Unknown Caller";
 }
 
-/**
- * Second line: phone formatted if present; otherwise blank.
- * (No "or" wording.)
- */
 function phoneLine(it: RecentItem) {
   const raw = String(it?.fromDisplay || it?.from || "").trim();
   if (!raw) return "";
   return formatUSPretty(raw);
 }
 
-/**
- * Pick the best callSid for display + navigation.
- */
 function bestCallSid(it: RecentItem) {
-  return String(it?.callSid || it?.id || "").trim();
+  const sid = String((it as any)?.callSid || "").trim();
+  if (sid) return sid;
+  const sid2 = String((it as any)?.sid || "").trim();
+  if (sid2) return sid2;
+  return "";
 }
 
-/**
- * Unique React key so duplicates never crash the list.
- * Your feed can include multiple rows with same callSid,
- * so we include timestamp + idx as last resort.
- */
 function itemKey(it: RecentItem, idx: number) {
-  const sid = bestCallSid(it) || "item";
-  const t = String(it?.at || it?.ts || "").trim() || "t";
-  return `${sid}:${t}:${idx}`;
+  const sid = bestCallSid(it);
+  if (sid) return sid;
+
+  const ts = String((it as any)?.ts || "").trim();
+  const from = String((it as any)?.from || "").trim();
+  const action = String((it as any)?.action || (it as any)?.decision || "").trim();
+
+  const base = `${ts}|${from}|${action}`;
+  return base !== "||" ? base : `idx:${idx}`;
 }
 
-/**
- * Dedupe for UI list:
- * Keep newest per callSid (or id fallback)
- */
 function dedupeRecent(items: RecentItem[]) {
-  const bySid = new Map<string, RecentItem>();
+  const byKey = new Map<string, RecentItem>();
 
-  for (const it of items || []) {
-    const sid = bestCallSid(it);
-    if (!sid) continue;
+  for (let i = 0; i < (items || []).length; i++) {
+    const it = items[i];
+    const key = itemKey(it, i);
 
-    const t = String(it?.at || it?.ts || "").trim();
-    const cur = bySid.get(sid);
-
-    if (!cur) {
-      bySid.set(sid, it);
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, it);
       continue;
     }
 
-    const curT = String(cur?.at || cur?.ts || "").trim();
-    // ISO strings compare lexicographically
-    if (t && (!curT || t > curT)) {
-      bySid.set(sid, it);
-    }
+    const tPrev = Date.parse(String((prev as any)?.ts || "")) || 0;
+    const tIt = Date.parse(String((it as any)?.ts || "")) || 0;
+    if (tIt >= tPrev) byKey.set(key, it);
   }
 
-  return Array.from(bySid.values()).sort((a, b) => {
-    const ta = String(a?.at || a?.ts || "");
-    const tb = String(b?.at || b?.ts || "");
-    return tb.localeCompare(ta); // newest first
-  });
+  return Array.from(byKey.values());
 }
 
 export default function HomeScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
 
   const [loading, setLoading] = useState(false);
+
   const [refreshing, setRefreshing] = useState(false);
   const didInitialLoad = useRef(false);
 
@@ -164,6 +193,38 @@ export default function HomeScreen({ navigation }: any) {
   const [voicemailOn, setVoicemailOn] = useState(true);
 
   const [recent, setRecent] = useState<RecentItem[]>([]);
+
+  // Auto-sync contacts allowlist (at most once per app session + once per 24h inside lib)
+  const didKickAllowlistSync = useRef(false);
+
+  useEffect(() => {
+    if (didKickAllowlistSync.current) return;
+    didKickAllowlistSync.current = true;
+
+    let alive = true;
+
+    syncContactsAllowlistIfNeeded()
+      .then((r) => {
+        if (!alive) return;
+
+        if (!r?.didRun) return; // not due
+        if (!r.ok) {
+          console.log("[allowlist] sync failed:", r.error || "unknown error");
+          return;
+        }
+
+        const count = typeof r.count === "number" ? r.count : 0;
+        if (count > 0) console.log("[allowlist] synced contacts:", count);
+      })
+      .catch((e) => {
+        if (!alive) return;
+        console.log("[allowlist] sync error:", String(e?.message || e));
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const statusLabel = enabled ? "Protection Active" : "Protection Paused";
   const statusSub = enabled
@@ -184,7 +245,6 @@ export default function HomeScreen({ navigation }: any) {
         apiFetch("/app/api/recent", { method: "GET" }),
       ]);
 
-      // --- Settings / toggles (mobile API) ---
       if (mobileRes.status === "fulfilled") {
         const rMobile = mobileRes.value;
         setEnabled(Boolean(rMobile?.enabled ?? rMobile?.protectionEnabled ?? true));
@@ -193,9 +253,12 @@ export default function HomeScreen({ navigation }: any) {
         setVoicemailOn(Boolean(rMobile?.voicemailOn ?? rMobile?.voicemail ?? true));
       }
 
-      // --- Recent calls (app API) ---
       const rRecent = recentRes.status === "fulfilled" ? recentRes.value : [];
-      const items: RecentItem[] = Array.isArray(rRecent) ? rRecent : [];
+      const items: RecentItem[] = Array.isArray(rRecent)
+        ? rRecent
+        : Array.isArray((rRecent as any)?.items)
+        ? (rRecent as any).items
+        : [];
 
       const unique = dedupeRecent(items);
       setRecent(unique.slice(0, 25));
@@ -254,17 +317,25 @@ export default function HomeScreen({ navigation }: any) {
     setRule("voicemail", v);
   }, [voicemailOn, setRule]);
 
-  // initial load once
-  React.useEffect(() => {
+  useEffect(() => {
     if (didInitialLoad.current) return;
     didInitialLoad.current = true;
 
     let mounted = true;
+
     (async () => {
-      if (!mounted) return;
-      setLoading(true);
-      await loadRefresh();
-      setLoading(false);
+      try {
+        if (!mounted) return;
+        setLoading(true);
+
+        // loads status + recent
+        await loadRefresh();
+
+        // loads greeting preview
+      } finally {
+        if (!mounted) return;
+        setLoading(false);
+      }
     })();
 
     return () => {
@@ -283,42 +354,36 @@ export default function HomeScreen({ navigation }: any) {
           },
         ]}
       >
-        <ScrollView
-          contentContainerStyle={styles.container}
-          showsVerticalScrollIndicator={false}
-        >
+        <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
           {/* HERO */}
-          <View style={styles.heroWrap}>
+          <View style={styles.headerRow}>
             <Text style={styles.heroTitle}>SNAPI Shield</Text>
-            <Text style={styles.heroSub}>{statusSub}</Text>
-
-            <View style={styles.heroRow}>
-              <View style={statusPillStyle}>
-                <Text style={styles.pillText}>{statusLabel}</Text>
-              </View>
-
-              <Pressable
-                onPress={onToggleEnabled}
-                style={[
-                  styles.bigToggle,
-                  enabled ? styles.bigToggleOn : styles.bigToggleOff,
-                ]}
-              >
-                <Text style={styles.bigToggleText}>
-                  {enabled ? "PAUSE" : "RESUME"}
-                </Text>
-              </Pressable>
-            </View>
           </View>
 
+          <View style={styles.statusRow}>
+            <View style={[styles.pill, enabled ? styles.pillOn : styles.pillOff]}>
+              <Text style={styles.pillText}>{statusLabel}</Text>
+            </View>
+
+            <Pressable onPress={onToggleEnabled} style={styles.pauseBtn} hitSlop={10}>
+              <Text style={styles.pauseText}>{enabled ? "PAUSE" : "RESUME"}</Text>
+            </Pressable>
+          </View>
           {/* QUICK CONTROLS */}
           <GlassCard style={[styles.card, styles.qcCard]}>
             <View style={styles.cardHeaderRow}>
-              <Text style={[styles.cardTitle, styles.qcTitle]} numberOfLines={1}>
-                Quick Controls
+              <Text style={[styles.cardTitle, styles.qcTitle]} numberOfLines={2}>
+                Quick Connect
               </Text>
 
               <View style={styles.headerRight}>
+                <Pressable
+                  onPress={() => navigation?.navigate?.("SetupHelp")}
+                  style={styles.helpBtn}
+                >
+                  <Text style={styles.helpBtnText}>Setup</Text>
+                </Pressable>
+
                 <GhostButton
                   title={refreshing ? "Refreshing…" : "Refresh"}
                   onPress={() => {
@@ -332,12 +397,7 @@ export default function HomeScreen({ navigation }: any) {
             </View>
 
             <View style={styles.pillStack}>
-              <ControlPill
-                title="Spam"
-                desc="Block known spam"
-                value={spamOn}
-                onPress={toggleSpam}
-              />
+              <ControlPill title="Spam" desc="Block known spam" value={spamOn} onPress={toggleSpam} />
               <ControlPill
                 title="Unknown"
                 desc="Screen unknown callers"
@@ -358,6 +418,7 @@ export default function HomeScreen({ navigation }: any) {
                 <Text style={styles.loadingText}>Loading status…</Text>
               </View>
             ) : null}
+            
           </GlassCard>
 
           {/* RECENT */}
@@ -366,9 +427,7 @@ export default function HomeScreen({ navigation }: any) {
               <Text style={styles.cardTitle} numberOfLines={1}>
                 Recent Activity
               </Text>
-              <Text style={styles.cardHint}>
-                Last {Math.min(25, recent.length)} of 25
-              </Text>
+              <Text style={styles.cardHint}>Last {Math.min(25, recent.length)} of 25</Text>
             </View>
 
             {recent.length === 0 ? (
@@ -376,62 +435,59 @@ export default function HomeScreen({ navigation }: any) {
                 When SNAPI screens a call, you’ll see it listed here.
               </Text>
             ) : (
-              <View style={styles.list}>
-                {recent.map((it, idx) => {
-                  const dot = riskDotColor(it.risk ?? 0);
-                  const top = callerIdLine(it);
-                  const bottom = phoneLine(it);
-                  const callSid = bestCallSid(it);
-                  const showBlocked = Boolean(it?.blocked);
+              <>
+                <View style={styles.list}>
+                  {recent.map((it, idx) => {
+                    const dot = statusDotEmoji(it);
+                    const top = callerIdLine(it);
+                    const bottom = phoneLine(it);
+                    const callSid = bestCallSid(it);
 
-                  return (
-                    <View key={itemKey(it, idx)} style={styles.row}>
-                      <View style={styles.rowTop}>
-                        <View style={styles.rowLeft}>
-                          <View style={[styles.dot, { backgroundColor: dot }]} />
+                    return (
+                      <View key={itemKey(it, idx)} style={styles.row}>
+                        <View style={styles.rowTop}>
+                          <View style={styles.rowLeft}>
+                            <View style={styles.dotWrap}>
+                              <Text style={styles.statusDot}>{dot}</Text>
+                            </View>
 
-                          <View style={{ flex: 1 }}>
-                            <Text style={styles.rowTopLine} numberOfLines={1}>
-                              {top}
-                            </Text>
+                            <View style={{ flex: 1, minWidth: 0 }}>
+                              <Text style={styles.rowTopLine} numberOfLines={1}>
+                                {top}
+                              </Text>
 
-                            {bottom ? (
-                              <View style={styles.phoneRow}>
+                              {bottom ? (
                                 <Text style={styles.rowBottomLine} numberOfLines={1}>
                                   {bottom}
                                 </Text>
-
-                                {showBlocked ? (
-                                  <Text style={styles.rowBottomLine} numberOfLines={1}>
-                                    {"  "}Blocked
-                                  </Text>
-                                ) : null}
-                              </View>
-                            ) : showBlocked ? (
-                              // If no phone line, still show Blocked on the second line
-                              <Text style={styles.rowBottomLine} numberOfLines={1}>
-                                Blocked
-                              </Text>
-                            ) : null}
+                              ) : null}
+                            </View>
                           </View>
-                        </View>
 
-                        <Pressable
-                          style={[styles.viewBtn, styles.viewBtnRaised]}
-                          onPress={() =>
-                            navigation?.navigate?.("CallDetails", {
-                              item: it,
-                              callSid,
-                            })
-                          }
-                        >
-                          <Text style={styles.viewBtnText}>View</Text>
-                        </Pressable>
+                          <Pressable
+                            style={[styles.viewBtn, styles.viewBtnRaised]}
+                            onPress={() =>
+                              navigation?.navigate?.("CallDetails", {
+                                item: it,
+                                callSid,
+                              })
+                            }
+                          >
+                            <Text style={styles.viewBtnText}>View</Text>
+                          </Pressable>
+                        </View>
                       </View>
-                    </View>
-                  );
-                })}
-              </View>
+                    );
+                  })}
+                </View>
+
+                {/* LEGEND */}
+                <View style={styles.statusLegend}>
+                  <Text style={styles.statusLegendText}>🔴 Blocked</Text>
+                  <Text style={styles.statusLegendText}>🟢 Allowlisted</Text>
+                  <Text style={styles.statusLegendText}>🟡 Screened</Text>
+                </View>
+              </>
             )}
           </GlassCard>
         </ScrollView>
@@ -463,12 +519,7 @@ function ControlPill({
         </Text>
       </View>
 
-      <View
-        style={[
-          styles.ctrlState,
-          value ? styles.ctrlStateOn : styles.ctrlStateOff,
-        ]}
-      >
+      <View style={[styles.ctrlState, value ? styles.ctrlStateOn : styles.ctrlStateOff]}>
         <Text style={styles.ctrlStateText}>{value ? "ON" : "OFF"}</Text>
       </View>
     </Pressable>
@@ -512,6 +563,24 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     borderColor: "rgba(0,229,255,0.30)",
+    backgroundColor: "rgba(0,229,255,0.08)",
+  },
+
+  helpBtn: {
+    marginTop: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    marginRight: 8,
+  },
+  helpBtnText: {
+    color: Colors.text,
+    fontWeight: "900",
+    fontSize: 12,
+    letterSpacing: 0.4,
   },
 
   qcCard: { marginTop: 1 },
@@ -552,6 +621,27 @@ const styles = StyleSheet.create({
     fontSize: 12,
     letterSpacing: 0.6,
   },
+  statusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 10,
+    marginBottom: 12,
+  },
+  pauseBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  pauseText: {
+    color: Colors.text,
+    fontSize: 13,
+    fontWeight: "900",
+    letterSpacing: 0.6,
+  },
 
   card: {
     paddingHorizontal: 14,
@@ -582,7 +672,12 @@ const styles = StyleSheet.create({
   },
 
   qcTitle: { paddingTop: 2 },
-  headerRight: { flexShrink: 0, alignSelf: "center" },
+  headerRight: {
+    flexShrink: 0,
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+  },
   cardHint: { color: Colors.muted, fontSize: 12 },
 
   loadingRow: {
@@ -620,7 +715,18 @@ const styles = StyleSheet.create({
 
   rowLeft: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
 
-  dot: { width: 10, height: 10, borderRadius: 99 },
+  dotWrap: {
+    width: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  statusDot: {
+    fontSize: 11,
+    lineHeight: 18,
+    marginTop: 1,
+    textAlign: "center",
+  },
 
   rowTopLine: {
     color: Colors.text,
@@ -636,13 +742,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
 
-  phoneRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-  },
-
-  // mini button that matches Refresh styling language
   viewBtn: {
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -652,10 +751,9 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,229,255,0.08)",
   },
 
-  // ✅ raises the View button slightly
   viewBtnRaised: {
     alignSelf: "flex-start",
-    marginTop: 2, // smaller = higher; tweak 0..4 to taste
+    marginTop: 2,
   },
 
   viewBtnText: {
@@ -665,11 +763,23 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
   },
 
-  callId: {
-    marginTop: 8,
-    color: "rgba(255,255,255,0.45)",
-    fontSize: 11,
+  sectionTitle: {
+    color: Colors.text,
+    fontSize: 14,
     fontWeight: "700",
+    marginBottom: 6,
+  },
+  greetingQuote: {
+    color: Colors.text,
+    fontSize: 14,
+    lineHeight: 20,
+    opacity: 0.95,
+  },
+  greetingHint: {
+    color: Colors.subtext,
+    fontSize: 12,
+    marginTop: 6,
+    opacity: 0.85,
   },
 
   ctrlPill: {
@@ -727,5 +837,28 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     fontSize: 11,
     letterSpacing: 0.8,
+  },
+
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+
+  statusLegend: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.06)",
+  },
+
+  statusLegendText: {
+    color: Colors.muted,
+    fontSize: 11,
+    fontWeight: "700",
+    opacity: 0.85,
   },
 });

@@ -11,6 +11,7 @@ export default function GlassBackground({ children }: Props) {
     <View style={styles.root}>
       {/* Base depth */}
       <LinearGradient
+        pointerEvents="none"
         colors={["#050816", "#02040a"]}
         start={{ x: 0.2, y: 0 }}
         end={{ x: 0.8, y: 1 }}
@@ -19,6 +20,7 @@ export default function GlassBackground({ children }: Props) {
 
       {/* Teal atmosphere (top-left) */}
       <LinearGradient
+        pointerEvents="none"
         colors={["rgba(0,229,255,0.20)", "rgba(0,229,255,0.00)"]}
         start={{ x: 0.1, y: 0.1 }}
         end={{ x: 0.6, y: 0.6 }}
@@ -27,6 +29,7 @@ export default function GlassBackground({ children }: Props) {
 
       {/* Indigo atmosphere (bottom-right) */}
       <LinearGradient
+        pointerEvents="none"
         colors={["rgba(139,92,246,0.18)", "rgba(139,92,246,0.00)"]}
         start={{ x: 0.85, y: 0.75 }}
         end={{ x: 0.25, y: 0.2 }}

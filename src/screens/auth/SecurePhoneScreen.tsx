@@ -26,7 +26,7 @@ import type { RootStackParamList } from "../../navigation/RootNavigator";
 
 import { apiFetch } from "../../api/client";
 
-type Props = NativeStackScreenProps<RootStackParamList, "SecurePhone">;
+type Props = NativeStackScreenProps<RootStackParamList, "SecureSignIn" | "SecurePhone">;
 
 /**
  * Phone normalization:
@@ -54,21 +54,19 @@ function pickErrorMessage(err: any): string {
   if (!msg) return "Please try again.";
 
   const m = msg.toLowerCase();
-  if (m.includes("too many") || status === 429) {
-    return "Too many attempts. Please wait a moment and try again.";
-  }
-  if (m.includes("invalid") || m.includes("phone")) {
-    return "That phone number looks invalid. Please double-check and try again.";
-  }
-  if (m.includes("network") || m.includes("fetch") || m.includes("reachable")) {
-    return "Network issue. Please try again.";
-  }
+  if (m.includes("too many") || status === 429) return "Too many attempts. Please wait a moment and try again.";
+  if (m.includes("invalid") || m.includes("phone")) return "That phone number looks invalid. Please double-check and try again.";
+  if (m.includes("network") || m.includes("fetch") || m.includes("reachable")) return "Network issue. Please try again.";
+
   return msg;
 }
 
-export default function SecurePhoneScreen({ navigation }: Props) {
+export default function SecurePhoneScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const padX = Tokens?.pad?.screen ?? 18;
+
+  // ✅ Only true when this screen is being used as SecureSignIn and came from SetupFinal.
+  const fromSetup = route.name === "SecureSignIn" ? !!route.params?.fromSetup : false;
 
   const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
@@ -80,10 +78,7 @@ export default function SecurePhoneScreen({ navigation }: Props) {
     if (loading) return;
 
     if (!looksValid) {
-      Alert.alert(
-        "Enter your phone number",
-        'Include your country code, e.g. "+1 303 555 1212".'
-      );
+      Alert.alert("Enter your phone number", 'Include your country code, e.g. "+1 303 555 1212".');
       return;
     }
 
@@ -102,15 +97,13 @@ export default function SecurePhoneScreen({ navigation }: Props) {
 
       navigation.navigate("SecureOtp", { phone: e164 });
     } catch (err: any) {
-      Alert.alert("Couldn’t send code", pickErrorMessage(err));
+      Alert.alert("Couldn't send code", pickErrorMessage(err));
     } finally {
       setLoading(false);
     }
   }
 
-  const inputBorder = looksValid
-    ? "rgba(16,185,129,0.45)"
-    : "rgba(148,163,184,0.22)";
+  const inputBorder = looksValid ? "rgba(16,185,129,0.45)" : "rgba(148,163,184,0.22)";
 
   return (
     <GlassBackground>
@@ -127,20 +120,16 @@ export default function SecurePhoneScreen({ navigation }: Props) {
             paddingTop: Math.max(insets.top + 12, 18),
             paddingBottom: Math.max(insets.bottom + 16, 18),
             paddingHorizontal: padX,
-            justifyContent: "flex-start", // ✅ pushes the card upward
+            justifyContent: "flex-start",
           }}
         >
           <View style={{ width: "100%", maxWidth: 520, alignSelf: "center" }}>
             <GlassCard style={styles.card}>
               <Text style={[styles.kicker, { color: Colors.muted }]}>VERIFY</Text>
 
-              <Text style={[styles.title, { color: Colors.text }]}>
-                Enter your phone
-              </Text>
+              <Text style={[styles.title, { color: Colors.text }]}>Enter your phone</Text>
 
-              <Text style={[styles.sub, { color: Colors.muted }]}>
-                We’ll text a secure one-time code.
-              </Text>
+              <Text style={[styles.sub, { color: Colors.muted }]}>We’ll text a secure one-time code.</Text>
 
               <View style={{ height: 16 }} />
 
@@ -175,16 +164,16 @@ export default function SecurePhoneScreen({ navigation }: Props) {
                 disabled={loading}
                 style={[styles.sendBtn, { opacity: loading ? 0.7 : 1 }]}
               >
-                {loading ? (
-                  <ActivityIndicator />
-                ) : (
-                  <Text style={styles.sendBtnText}>Send Code</Text>
-                )}
+                {loading ? <ActivityIndicator /> : <Text style={styles.sendBtnText}>Send Code</Text>}
               </Pressable>
 
               <View style={{ height: 12 }} />
 
-              <GhostButton title="Back" onPress={() => navigation.goBack()} />
+              <GhostButton
+                title="Back"
+                onPress={() => (fromSetup ? navigation.replace("SetupFinal") : navigation.replace("Splash"))}
+                disabled={loading}
+              />
             </GlassCard>
           </View>
         </ScrollView>

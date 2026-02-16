@@ -1,115 +1,107 @@
 ﻿// src/navigation/RootNavigator.tsx
-import React, { useCallback } from "react";
+import React from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 
 import SplashScreen from "../screens/SplashScreen";
-import WelcomeScreen from "../screens/WelcomeScreen";
-import OnboardingScreen from "../screens/OnboardingScreen";
 
 import FirstTimeSetupScreen from "../screens/FirstTimeSetupScreen";
 import SetupFinalScreen from "../screens/setup/SetupFinalScreen";
+import SetupHelpScreen from "../screens/SetupHelpScreen";
 
-import SecureSignInScreen from "../screens/auth/SecureSignInScreen";
 import SecurePhoneScreen from "../screens/auth/SecurePhoneScreen";
 import SecureOtpScreen from "../screens/auth/SecureOtpScreen";
 
-import SignInScreen from "../screens/SignInScreen";
 import HomeScreen from "../screens/HomeScreen";
 
 import CallDetailsScreen from "../screens/CallDetailsScreen";
 import CallHistoryScreen from "../screens/CallHistoryScreen";
-
-import { isOnboardingComplete } from "../lib/onboarding";
-import { isSetupComplete } from "../lib/setup";
+import VoicemailPlayerScreen from "../screens/VoicemailPlayerScreen";
 
 export type RootStackParamList = {
   Splash: undefined;
-  Welcome: undefined;
-  Onboarding: undefined;
 
   FirstTimeSetup: undefined;
   SetupFinal: undefined;
+  SetupHelp: undefined;
 
-  SecureSignIn: undefined;
+  SecureSignIn: undefined | { fromSetup?: boolean };
   SecurePhone: undefined;
   SecureOtp: { phone: string };
 
-  SignIn: undefined;
   Home: undefined;
-
-  CallDetails: {
-    item: {
-      callSid?: string;
-      id?: string;
-      from?: string;
-      name?: string;
-      business?: string;
-      privateNumber?: boolean;
-      at?: string;
-      risk?: number;
-      voicemailUrl?: string;
-      blocked?: boolean;
-    };
-    callSid?: string;
-  };
-
+  CallDetails: { item: any; callSid?: string };
   CallHistory: undefined;
+  VoicemailPlayer: { url: string; item: any; callSid?: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-type SplashProps = NativeStackScreenProps<RootStackParamList, "Splash">;
+function SplashGate({ navigation }: any) {
+  const didRouteRef = React.useRef(false);
+  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
-function SplashGate({ navigation }: SplashProps) {
-  const onFinish = useCallback(
-    async ({ authed } = { authed: false }) => {
-      const t0 = Date.now();
-      let didNavigate = false;
-
-      const replaceOnce = (route: keyof RootStackParamList) => {
-        if (didNavigate) return;
-        didNavigate = true;
-
-        // Keep total splash time at least 4 seconds (including boot work)
-        const remaining = Math.max(0, 4000 - (Date.now() - t0));
-        setTimeout(() => {
-          try {
-            navigation.replace(route as any);
-          } catch {}
-        }, remaining);
-      };
+  const resetOnce = React.useCallback(
+    (route: keyof RootStackParamList, params?: any) => {
+      if (didRouteRef.current) return;
+      didRouteRef.current = true;
 
       try {
-        // 1) Onboarding gate (always first)
-        const completed = await isOnboardingComplete();
-        if (!completed) {
-          replaceOnce("Welcome");
-          return;
-        }
-
-        // 2) Setup gate (before auth)
-        const setupDone = await isSetupComplete();
-        if (!setupDone) {
-          replaceOnce("FirstTimeSetup");
-          return;
-        }
-
-        // 3) Setup done -> if authed, go home
-        if (authed) {
-          replaceOnce("Home");
-          return;
-        }
-
-        // 4) Not authed -> secure sign-in
-        replaceOnce("SecureSignIn");
+        navigation.reset({ index: 0, routes: [{ name: route as any, params }] });
       } catch {
-        // Safe fallback: never block user
-        replaceOnce("Welcome");
+        // fallback (older nav edge cases)
+        try {
+          navigation.replace(route as any, params);
+        } catch {
+          try {
+            navigation.navigate(route as any, params);
+          } catch {}
+        }
       }
     },
     [navigation]
   );
+
+  // Keep your "minimum splash time" UX
+  const routeWithMinSplash = React.useCallback(
+    (route: keyof RootStackParamList, t0: number) => {
+      const remaining = Math.max(0, 2500 - (Date.now() - t0));
+      const go = () => resetOnce(route);
+      if (remaining <= 0) go();
+      else timerRef.current = setTimeout(go, remaining);
+    },
+    [resetOnce]
+  );
+
+  // ✅ IMPORTANT: accept SplashScreen's computed result and route ONLY here.
+  const onFinish = React.useCallback(
+    (result: { authed: boolean; setupDone: boolean }) => {
+      if (didRouteRef.current) return;
+
+      const t0 = Date.now();
+
+      try {
+        const authed = !!result?.authed;
+        const setupDone = !!result?.setupDone;
+
+        // ✅ First gate after splash: setup
+        if (!setupDone) return routeWithMinSplash("FirstTimeSetup", t0);
+
+        // ✅ Setup done -> auth gate
+        if (authed) return routeWithMinSplash("Home", t0);
+        return routeWithMinSplash("SecureSignIn", t0);
+      } catch {
+        // safest fallback for fresh install
+        return routeWithMinSplash("FirstTimeSetup", t0);
+      }
+    },
+    [routeWithMinSplash]
+  );
+
+  React.useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
 
   return <SplashScreen onFinish={onFinish} />;
 }
@@ -127,22 +119,24 @@ export default function RootNavigator() {
     >
       <Stack.Screen name="Splash" component={SplashGate} options={{ animation: "none" }} />
 
-      <Stack.Screen name="Welcome" component={WelcomeScreen} options={{ animation: "none" }} />
-      <Stack.Screen name="Onboarding" component={OnboardingScreen} options={{ animation: "slide_from_right" }} />
-
       <Stack.Screen name="FirstTimeSetup" component={FirstTimeSetupScreen} options={{ animation: "fade" }} />
       <Stack.Screen name="SetupFinal" component={SetupFinalScreen} options={{ animation: "fade" }} />
+      <Stack.Screen name="SetupHelp" component={SetupHelpScreen} options={{ headerShown: false }} />
 
-      <Stack.Screen name="SecureSignIn" component={SecureSignInScreen} options={{ animation: "none" }} />
+      {/* Keep SecureSignIn as your phone/OTP entry flow */}
+      <Stack.Screen name="SecureSignIn" component={SecurePhoneScreen} options={{ animation: "fade" }} />
       <Stack.Screen name="SecurePhone" component={SecurePhoneScreen} options={{ animation: "fade" }} />
       <Stack.Screen name="SecureOtp" component={SecureOtpScreen} options={{ animation: "fade" }} />
 
-      <Stack.Screen name="SignIn" component={SignInScreen} options={{ animation: "slide_from_right" }} />
-
       <Stack.Screen name="Home" component={HomeScreen} options={{ animation: "fade" }} />
-
       <Stack.Screen name="CallDetails" component={CallDetailsScreen} options={{ animation: "slide_from_right" }} />
       <Stack.Screen name="CallHistory" component={CallHistoryScreen} />
+      <Stack.Screen
+        name="VoicemailPlayer"
+        component={VoicemailPlayerScreen}
+        options={{ animation: "slide_from_right" }}
+      />
     </Stack.Navigator>
   );
 }
+

@@ -1,4 +1,5 @@
 // src/screens/setup/SetupFinalScreen.tsx
+
 import React, { useMemo, useState } from "react";
 import {
   View,
@@ -7,10 +8,11 @@ import {
   Pressable,
   Alert,
   Linking,
-  Platform,
   ScrollView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import { CommonActions } from "@react-navigation/native";
 
 import GlassBackground from "../../components/GlassBackground";
 import GlassCard from "../../components/GlassCard";
@@ -19,8 +21,8 @@ import { PrimaryButton, GhostButton } from "../../components/Buttons";
 import { Colors } from "../../theme/colors";
 import { Tokens } from "../../theme/tokens";
 
-import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
+import { setSetupComplete } from "../../lib/setup";
 
 type Props = NativeStackScreenProps<RootStackParamList, "SetupFinal">;
 
@@ -37,18 +39,30 @@ export default function SetupFinalScreen({ navigation }: Props) {
       // Most reliable cross-platform way to open app settings
       await Linking.openSettings();
     } catch {
-      Alert.alert("Couldn’t open settings", "Please open your phone settings and enable notifications for SNAPI.");
+      Alert.alert(
+        "Couldn't open settings",
+        "Please open your phone settings and enable notifications for SNAPI."
+      );
     }
   }
 
-  function continueToDashboard() {
+  async function continueToDashboard() {
     if (!canContinue) return;
 
-    // This is the "handoff" moment: setup -> dashboard
-    navigation.reset({
-      index: 0,
-      routes: [{ name: "Home" as any }],
-    });
+    try {
+      // ✅ Mark setup complete so Splash never routes back to setup
+      await setSetupComplete(true);
+
+      // ✅ Next step: verify phone (OTP). Hard reset so user can’t go back into setup.
+      navigation.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [{ name: "SecureSignIn", params: { fromSetup: true } }],
+        })
+      );
+    } catch {
+      Alert.alert("Setup", "Couldn't finish setup. Please try again.");
+    }
   }
 
   return (
@@ -71,7 +85,8 @@ export default function SetupFinalScreen({ navigation }: Props) {
             <Text style={styles.title}>Turn on SNAPI notifications</Text>
 
             <Text style={styles.sub}>
-              SNAPI needs notifications enabled to alert you when a call is blocked, screened, or sent to voicemail.
+              SNAPI needs notifications enabled to alert you when a call is blocked, screened, or
+              sent to voicemail.
             </Text>
 
             <View style={{ height: 14 }} />
@@ -83,10 +98,12 @@ export default function SetupFinalScreen({ navigation }: Props) {
                 1) Open <Text style={styles.stepStrong}>Settings</Text>
               </Text>
               <Text style={styles.stepLine}>
-                2) Tap <Text style={styles.stepStrong}>Apps</Text> → <Text style={styles.stepStrong}>SNAPI</Text>
+                2) Tap <Text style={styles.stepStrong}>Apps</Text> →{" "}
+                <Text style={styles.stepStrong}>SNAPI</Text>
               </Text>
               <Text style={styles.stepLine}>
-                3) Tap <Text style={styles.stepStrong}>Notifications</Text> → Turn <Text style={styles.stepStrong}>ON</Text>
+                3) Tap <Text style={styles.stepStrong}>Notifications</Text> → Turn{" "}
+                <Text style={styles.stepStrong}>ON</Text>
               </Text>
 
               <View style={{ height: 12 }} />
@@ -101,6 +118,9 @@ export default function SetupFinalScreen({ navigation }: Props) {
               onPress={() => setConfirmedNotifications((v) => !v)}
               style={styles.checkRow}
               hitSlop={10}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: confirmedNotifications }}
+              accessibilityLabel="Confirm notifications enabled"
             >
               <View style={[styles.checkbox, confirmedNotifications && styles.checkboxOn]}>
                 {confirmedNotifications ? <Text style={styles.checkMark}>✓</Text> : null}
@@ -114,7 +134,7 @@ export default function SetupFinalScreen({ navigation }: Props) {
             <View style={{ height: 16 }} />
 
             <PrimaryButton
-              title="Continue to Dashboard"
+              title="Continue to Verify"
               onPress={continueToDashboard}
               disabled={!canContinue}
             />

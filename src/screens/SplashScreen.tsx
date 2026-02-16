@@ -1,24 +1,19 @@
 ﻿// src/screens/SplashScreen.tsx
 import React, { useEffect, useRef } from "react";
-import {
-  View,
-  StyleSheet,
-  Animated,
-  AccessibilityInfo,
-  Easing,
-} from "react-native";
+import { View, StyleSheet, Animated, AccessibilityInfo, Easing } from "react-native";
 
 import GlassBackground from "../components/GlassBackground";
 
-// Import safely (works even if some functions aren't exported yet)
-import * as Api from "../api/client";
+// ✅ Real imports (no `as any`)
+import { getAccessToken, refreshSession } from "../api/client";
+import { getSetupComplete } from "../lib/setup";
 
 type Props = {
   /**
    * Called once when splash is done AND we've attempted to restore auth.
-   * Backwards compatible: callers can ignore the argument.
+   * Caller decides where to navigate next.
    */
-  onFinish: (result?: { authed: boolean }) => void;
+  onFinish: (result: { authed: boolean; setupDone: boolean }) => void;
 };
 
 // Fade-in duration (ms)
@@ -29,22 +24,23 @@ const BOOT_TIMEOUT_MS = 2500;
 
 export default function SplashScreen({ onFinish }: Props) {
   const imageOpacity = useRef(new Animated.Value(0)).current;
-  const done = useRef(false);
+  const doneRef = useRef(false);
 
   useEffect(() => {
-    const finish = (authed: boolean) => {
-      if (done.current) return;
-      done.current = true;
-      onFinish?.({ authed });
+    let alive = true;
+
+    const finish = (authed: boolean, setupDone: boolean) => {
+      if (!alive) return;
+      if (doneRef.current) return;
+      doneRef.current = true;
+      onFinish?.({ authed, setupDone });
     };
 
-    // reset on mount
+    // reset animation on mount
     imageOpacity.stopAnimation();
     imageOpacity.setValue(0);
 
-    // -----------------------------
-    // 1) Animation promise
-    // -----------------------------
+    // 1) Animation
     const runAnimation = async () => {
       try {
         const reduced = await AccessibilityInfo.isReduceMotionEnabled();
@@ -52,85 +48,66 @@ export default function SplashScreen({ onFinish }: Props) {
           imageOpacity.setValue(1);
           return;
         }
-
-        await new Promise<void>((resolve) => {
-          Animated.timing(imageOpacity, {
-            toValue: 1,
-            duration: FADE_MS,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-          }).start(({ finished }) => {
-            if (finished) resolve();
-            else resolve();
-          });
-        });
       } catch {
-        // Fallback: still animate quickly then proceed
-        await new Promise<void>((resolve) => {
-          Animated.timing(imageOpacity, {
-            toValue: 1,
-            duration: FADE_MS,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-          }).start(() => resolve());
-        });
+        // ignore reduce-motion lookup failure
       }
+
+      await new Promise<void>((resolve) => {
+        Animated.timing(imageOpacity, {
+          toValue: 1,
+          duration: FADE_MS,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }).start(() => resolve());
+      });
     };
 
-    // -----------------------------
-    // 2) Auth bootstrap promise
-    // -----------------------------
-    const runBoot = async (): Promise<boolean> => {
-      const getAccessToken = (Api as any).getAccessToken as undefined | (() => Promise<string | null>);
-      const getRefreshToken = (Api as any).getRefreshToken as undefined | (() => Promise<string | null>);
-      const refreshSession = (Api as any).refreshSession as undefined | (() => Promise<boolean>);
+    // 2) Boot / restore auth
+    const runBoot = async (): Promise<{ authed: boolean; setupDone: boolean }> => {
+      let authed = false;
+      let setupDone = false;
 
       try {
-        // If helper functions don't exist yet, we can't restore here.
-        if (!getAccessToken || !getRefreshToken) return false;
+        // A) Try existing access token
+        const access = await getAccessToken().catch(() => null);
+        authed = !!access;
 
-        const access = await getAccessToken();
-        if (access) return true;
-
-        const refresh = await getRefreshToken();
-        if (refresh && refreshSession) {
-          const ok = await refreshSession();
-          return !!ok;
+        // B) If no access, try refresh
+        if (!authed) {
+          const ok = await refreshSession().catch(() => false);
+          authed = !!ok;
         }
 
-        return false;
+        // C) Setup completion is meaningful even if not authed (but usually paired)
+        setupDone = await getSetupComplete().catch(() => false);
+
+        return { authed, setupDone };
       } catch {
-        return false;
+        return { authed: false, setupDone: false };
       }
     };
 
-    // -----------------------------
-    // Run both in parallel, then finish once.
-    // -----------------------------
-    let alive = true;
-
     (async () => {
-      const bootPromise = runBoot();
-
-      // timeout wrapper for boot so splash doesn't hang
-      const bootTimed = await Promise.race<boolean>([
-        bootPromise,
-        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), BOOT_TIMEOUT_MS)),
+      // Run boot with timeout so splash never hangs
+      const bootTimed = await Promise.race<{ authed: boolean; setupDone: boolean }>([
+        runBoot(),
+        new Promise<{ authed: boolean; setupDone: boolean }>((resolve) =>
+          setTimeout(() => resolve({ authed: false, setupDone: false }), BOOT_TIMEOUT_MS)
+        ),
       ]);
 
-      // we still want the animation to complete (unless reduce-motion)
+      // Ensure animation completes (unless reduce-motion forced to 1 instantly)
       await runAnimation();
 
-      if (!alive) return;
-      finish(bootTimed);
+      finish(bootTimed.authed, bootTimed.setupDone);
     })();
 
     return () => {
       alive = false;
-      done.current = true;
+      doneRef.current = true;
       imageOpacity.stopAnimation();
     };
-  }, [onFinish, imageOpacity]);
+  }, [imageOpacity, onFinish]);
 
   return (
     <GlassBackground>

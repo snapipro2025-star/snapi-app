@@ -1,3 +1,5 @@
+// src/screens/auth/SecureOtpScreen.tsx (section rewrite)
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
@@ -9,6 +11,8 @@ import {
   Platform,
   Pressable,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 
 import GlassBackground from "../../components/GlassBackground";
 import GlassCard from "../../components/GlassCard";
@@ -17,11 +21,11 @@ import { PrimaryButton, GhostButton } from "../../components/Buttons";
 import { Colors } from "../../theme/colors";
 import { Tokens } from "../../theme/tokens";
 
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
+import { apiFetch, setTokens } from "../../api/client";
+import { setSetupComplete } from "../../lib/setup";
 
-// ✅ RootNavigator param list must include:
+// RootNavigator param list must include:
 // SecureOtp: { phone: string };
 type Props = NativeStackScreenProps<RootStackParamList, "SecureOtp">;
 
@@ -29,15 +33,27 @@ function digitsOnly(v: string) {
   return String(v || "").replace(/\D/g, "");
 }
 
+function pickErrMsg(e: any) {
+  const msg = String(e?.message || "");
+  const status = Number(e?.status || e?.statusCode || 0);
+  const m = msg.toLowerCase();
+
+  if (status === 429 || m.includes("too many")) return "Too many attempts. Please wait a bit and try again.";
+  if (m.includes("network") || m.includes("fetch") || m.includes("reachable")) return "Network issue. Please try again.";
+  if (m.includes("invalid") || m.includes("code")) return "That code doesn’t look right. Please try again.";
+  return msg || "Please try again.";
+}
+
 export default function SecureOtpScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const padX = Tokens?.pad?.screen ?? 18;
 
-  const phone = route.params?.phone || "";
+  const phone = String(route.params?.phone || "").trim();
+
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // --- resend cooldown (premium UX) ---
+  // resend cooldown
   const [cooldown, setCooldown] = useState(0);
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -45,73 +61,122 @@ export default function SecureOtpScreen({ navigation, route }: Props) {
     return () => clearInterval(t);
   }, [cooldown]);
 
-  // Prevent double-submit (auto verify + button press)
+  // Prevent double-submit
   const verifyingRef = useRef(false);
 
-  const canVerify = useMemo(() => digitsOnly(code).length === 6, [code]);
+  const cleanCode = useMemo(() => digitsOnly(code).slice(0, 6), [code]);
+  const canVerify = cleanCode.length === 6;
 
-  const verify = useCallback(
-    async (codeOverride?: string) => {
-      const c = digitsOnly(codeOverride ?? code).trim();
+    const verify = useCallback(
+      async (codeOverride?: string) => {
+        const c = digitsOnly(codeOverride ?? code).slice(0, 6).trim();
 
-      if (c.length < 6) {
-        Alert.alert(
-          "Enter the code",
-          "Check your text messages and enter the 6-digit verification code."
-        );
-        return;
-      }
+        if (c.length !== 6) {
+          Alert.alert("Enter the code", "Please enter the 6-digit verification code.");
+          return;
+        }
+        if (loading || verifyingRef.current) return;
 
-      if (loading || verifyingRef.current) return;
+        try {
+          verifyingRef.current = true;
+          setLoading(true);
 
-      try {
-        verifyingRef.current = true;
-        setLoading(true);
+          const r = await apiFetch("/mobile/auth/otp/verify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ phone, code: c }),
+          });
 
-        // ✅ TODO: call your verify endpoint here (phone + code)
-        // Example (once you wire it):
-        // const r = await apiFetch("/auth/verify", { method:"POST", body:{ phone, code:c }});
-        // await setAuthToken(r.token);
-        // navigation.reset({ index: 0, routes: [{ name: "Home" as any }] });
+          if (r?.ok === false) {
+            Alert.alert("Verification failed", r?.error || "Please try again.");
+            return;
+          }
 
-        navigation.replace("Home");
-      } catch (e: any) {
-        Alert.alert("Verification failed", e?.message || "Please try again.");
-      } finally {
-        verifyingRef.current = false;
-        setLoading(false);
-      }
-    },
-    [code, loading, navigation, phone]
-  );
+          // accept multiple shapes
+          const accessToken =
+            r?.accessToken || r?.access_token || r?.access || r?.token || r?.jwt || r?.session?.accessToken || "";
+          const refreshToken =
+            r?.refreshToken || r?.refresh_token || r?.refresh || r?.rt || r?.session?.refreshToken || "";
+
+          if (!accessToken || !refreshToken) {
+            Alert.alert(
+              "Verification failed",
+              "Server did not return session tokens. Check /mobile/auth/otp/verify response."
+            );
+            return;
+          }
+
+          // ✅ Persist auth + mark setup complete, then hard-reset to Home
+          await setTokens(String(accessToken), String(refreshToken));
+
+          // TEMP DEBUG (remove later)
+          try {
+            const { getSession } = await import("../../api/client");
+            console.log("[OTP] session after setTokens =", getSession?.());
+          } catch (e) {
+            console.log("[OTP] session debug failed", e);
+          }
+
+          // optional: give SecureStore a beat on some devices
+          await new Promise((res) => setTimeout(res, 150));
+
+          navigation.reset({
+            index: 0,
+            routes: [{ name: "Home" }],
+          });
+        } catch (e: any) {
+          Alert.alert("Verification failed", pickErrMsg(e));
+        } finally {
+          verifyingRef.current = false;
+          setLoading(false);
+        }
+      },
+      [code, loading, phone, navigation]
+    );
 
   const resend = useCallback(async () => {
     if (loading) return;
     if (cooldown > 0) return;
 
+    if (!phone) {
+      Alert.alert("Missing phone", "Please go back and enter your phone number again.");
+      return;
+    }
+
     try {
       setLoading(true);
 
-      // ✅ TODO: call your resend/start endpoint here (phone)
-      // Example:
-      // await apiFetch("/auth/start", { method:"POST", body:{ phone } });
+      const r = await apiFetch("/mobile/auth/otp/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone }),
+      });
+
+      if (r?.ok === false) {
+        Alert.alert("Resend failed", r?.error || "Please try again.");
+        return;
+      }
 
       setCooldown(25);
       Alert.alert("Code sent", `We sent a new verification code to ${phone}.`);
     } catch (e: any) {
-      Alert.alert("Resend failed", e?.message || "Please try again.");
+      Alert.alert("Resend failed", pickErrMsg(e));
     } finally {
       setLoading(false);
     }
   }, [cooldown, loading, phone]);
 
+  const borderOk = "rgba(16,185,129,0.45)";
+  const borderDefault = "rgba(148,163,184,0.22)";
+  const inputBorder = canVerify ? borderOk : borderDefault;
+
+  // ... rest of your component continues
   return (
     <GlassBackground>
       <View
         style={[
           styles.page,
           {
-            // ✅ tighter + avoids feeling like "dead space"
             paddingTop: Math.max(insets.top, 10),
             paddingHorizontal: padX,
             alignItems: "center",
@@ -126,38 +191,29 @@ export default function SecureOtpScreen({ navigation, route }: Props) {
           <GlassCard style={styles.card}>
             <Text style={[styles.kicker, { color: Colors.muted }]}>VERIFY</Text>
 
-            <Text style={[styles.title, { color: Colors.text }]}>
-              Enter the code
-            </Text>
+            <Text style={[styles.title, { color: Colors.text }]}>Enter the code</Text>
 
-            <Text style={[styles.sub, { color: Colors.muted }]}>
-              Sent to {phone}
-            </Text>
+            <Text style={[styles.sub, { color: Colors.muted }]}>Sent to {phone || "your phone"}</Text>
 
             <View style={{ height: 14 }} />
 
             <TextInput
-              value={code}
+              value={cleanCode}
               autoFocus
-              onChangeText={(v) => {
-                const clean = digitsOnly(v);
-                setCode(clean);
-              }}
+              onChangeText={(v) => setCode(digitsOnly(v))}
               placeholder="123456"
               placeholderTextColor="rgba(148,163,184,0.65)"
               keyboardType="number-pad"
               inputMode="numeric"
               maxLength={6}
               returnKeyType="done"
-              onSubmitEditing={() => verify()}
+              onSubmitEditing={() => verify(cleanCode)}
               editable={!loading}
               style={[
                 styles.input,
                 {
                   color: Colors.text,
-                  borderColor: canVerify
-                    ? "rgba(16,185,129,0.45)"
-                    : "rgba(148,163,184,0.22)",
+                  borderColor: inputBorder,
                   backgroundColor: "rgba(8,14,32,0.55)",
                 },
               ]}
@@ -166,11 +222,8 @@ export default function SecureOtpScreen({ navigation, route }: Props) {
 
             <View style={{ height: 12 }} />
 
-            {/* ✅ subtle helper row */}
             <View style={styles.helperRow}>
-              <Text style={[styles.helperText, { color: Colors.muted }]}>
-                Didn’t get it?
-              </Text>
+              <Text style={[styles.helperText, { color: Colors.muted }]}>Didn’t get it?</Text>
 
               <Pressable
                 onPress={resend}
@@ -194,13 +247,13 @@ export default function SecureOtpScreen({ navigation, route }: Props) {
 
             <PrimaryButton
               title={loading ? "Verifying..." : "Verify"}
-              onPress={() => verify()}
+              onPress={() => verify(cleanCode)}
               disabled={loading || !canVerify}
             />
 
             <View style={{ height: 10 }} />
 
-            <GhostButton title="Back" onPress={() => navigation.goBack()} />
+            <GhostButton title="Back" onPress={() => navigation.goBack()} disabled={loading} />
           </GlassCard>
         </KeyboardAvoidingView>
       </View>
@@ -226,6 +279,7 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     opacity: 0.85,
     marginBottom: 10,
+    includeFontPadding: false,
   },
 
   title: {
@@ -233,6 +287,7 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: 0.2,
     marginBottom: 8,
+    includeFontPadding: false,
   },
 
   sub: {

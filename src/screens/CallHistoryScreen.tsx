@@ -1,5 +1,5 @@
 // src/screens/CallHistoryScreen.tsx
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -20,7 +20,6 @@ import { apiFetch } from "../api/client";
 type RecentItem = {
   id?: string;
 
-  // backend commonly provides callSid + ts
   callSid?: string;
   ts?: string; // ISO
   at?: string; // ISO (legacy)
@@ -32,9 +31,25 @@ type RecentItem = {
   risk?: number | string;
 
   transcript?: string;
+
   voicemailUrl?: string;
+  voicemailRecordingSid?: string;
+
+  recordingUrl?: string;
+  recordingSid?: string;
+
   blocked?: boolean;
+
+  status?: string;
+  action?: string;
+  decision?: string;
+  source?: string;
+  device?: string;
 };
+
+function clean(s: any) {
+  return String(s ?? "").trim();
+}
 
 function clamp(n: number, a: number, b: number) {
   return Math.max(a, Math.min(b, n));
@@ -45,7 +60,6 @@ function normalizeRisk(risk: RecentItem["risk"]): number {
   const s = String(risk || "").toLowerCase().trim();
   if (!s) return 0;
 
-  // handle simple labels seen in some records
   if (s === "low") return 15;
   if (s === "medium" || s === "med") return 55;
   if (s === "high") return 85;
@@ -62,8 +76,9 @@ function riskDotColor(risk: number) {
 }
 
 function fmtWhen(iso?: string) {
-  if (!iso) return "";
-  const d = new Date(iso);
+  const s = clean(iso);
+  if (!s) return "";
+  const d = new Date(s);
   if (Number.isNaN(d.getTime())) return "";
 
   const now = new Date();
@@ -79,15 +94,41 @@ function fmtWhen(iso?: string) {
 }
 
 function getWhenField(it: RecentItem) {
-  return it.at || it.ts || "";
+  return clean(it.at) || clean(it.ts) || "";
 }
 
-function getStableKey(it: RecentItem, idx: number) {
-  return (
-    it.id ||
-    it.callSid ||
-    `${it.from || "unknown"}:${getWhenField(it) || "na"}:${idx}`
-  );
+/**
+ * Row identity:
+ * - Prefer callSid (most stable)
+ * - else id
+ * - else fallback from+when+idx (only used if callSid/id missing)
+ */
+function getRowKey(it: RecentItem, idx: number) {
+  const sid = clean(it.callSid);
+  if (sid) return `sid:${sid}`;
+
+  const id = clean(it.id);
+  if (id) return `id:${id}`;
+
+  const from = clean(it.from) || "unknown";
+  const when = getWhenField(it) || "na";
+  return `fb:${from}:${when}:${idx}`;
+}
+
+function extractRecentList(payload: any): RecentItem[] {
+  if (Array.isArray(payload)) return payload as RecentItem[];
+  if (Array.isArray(payload?.items)) return payload.items as RecentItem[];
+  return [];
+}
+
+function getVoicemailSid(it: RecentItem) {
+  const sid = clean(it.voicemailRecordingSid) || clean(it.recordingSid);
+  return sid && /^RE[a-zA-Z0-9]+$/.test(sid) ? sid : "";
+}
+
+function getAnyVoicemailUrl(it: RecentItem) {
+  // direct URLs might 401 if Twilio; we only use as fallback
+  return clean(it.voicemailUrl) || clean(it.recordingUrl) || "";
 }
 
 export default function CallHistoryScreen({ navigation }: any) {
@@ -99,55 +140,149 @@ export default function CallHistoryScreen({ navigation }: any) {
 
   const [items, setItems] = useState<RecentItem[]>([]);
 
+  // Guards:
+  // - rowGuard: prevents same-row double invoke in same tick / fast taps
+  // - numberGuard: prevents duplicate POSTs for the same "from" even if row keys differ
+  const rowGuardRef = useRef<Record<string, boolean>>({});
+  const numberGuardRef = useRef<Record<string, boolean>>({});
+  const voicemailGuardRef = useRef<Record<string, boolean>>({});
+
   const load = useCallback(async () => {
     try {
       setRefreshing(true);
-
-      // ✅ Canonical recent calls endpoint (returns ARRAY)
       const rRecent = await apiFetch("/app/api/recent", { method: "GET" });
-      const list: RecentItem[] = Array.isArray(rRecent) ? rRecent : [];
-
-      // For now: last 10. Later: last 50 + pagination.
-      setItems(list.slice(0, 10));
+      setItems(extractRecentList(rRecent));
     } catch (e: any) {
-      Alert.alert("Could not load", e?.message || "Please try again.");
+      Alert.alert("Refresh failed", e?.message || "Please try again.");
     } finally {
       setRefreshing(false);
     }
   }, []);
 
-  const toggleBlock = useCallback(async (item: RecentItem) => {
-    const next = !item.blocked;
+  const openVoicemail = useCallback(
+    async (it: RecentItem, idx: number) => {
+      const sid = getVoicemailSid(it);
+      const direct = getAnyVoicemailUrl(it);
 
-    setItems((prev) =>
-      prev.map((x) =>
-        (x.id && item.id && x.id === item.id) ||
-        (x.callSid && item.callSid && x.callSid === item.callSid)
-          ? { ...x, blocked: next }
-          : x
-      )
-    );
+      if (!sid && !direct) return;
+
+      const rowKey = getRowKey(it, idx);
+
+      // absorb double taps
+      if (voicemailGuardRef.current[rowKey]) return;
+      voicemailGuardRef.current[rowKey] = true;
+
+      try {
+        // Preferred: mint signed URL (works with expo-av, no headers needed)
+        if (sid) {
+          const r = await apiFetch(`/app/api/voicemail-url?sid=${encodeURIComponent(sid)}`, {
+            method: "GET",
+          });
+
+          if (r?.ok && r?.url) {
+            navigation?.navigate?.("VoicemailPlayer", {
+              url: String(r.url),
+              item: it,
+              callSid: it.callSid,
+            });
+            return;
+          }
+
+          console.warn("[openVoicemail] mint failed:", r);
+        }
+
+        // Fallback: try direct URL (may 401 if Twilio)
+        if (direct) {
+          navigation?.navigate?.("VoicemailPlayer", {
+            url: direct,
+            item: it,
+            callSid: it.callSid,
+          });
+          return;
+        }
+      } catch (e) {
+        console.warn("[openVoicemail] error:", e);
+      } finally {
+        setTimeout(() => {
+          voicemailGuardRef.current[rowKey] = false;
+        }, 500);
+      }
+    },
+    [navigation]
+  );
+
+  const toggleBlock = useCallback(async (item: RecentItem, idx: number) => {
+    const from = clean(item.from);
+    if (!from) {
+      Alert.alert("Missing number", "No caller number is available to block.");
+      return;
+    }
+
+    const rowKey = getRowKey(item, idx);
+
+    if (rowGuardRef.current[rowKey]) return;
+    rowGuardRef.current[rowKey] = true;
+
+    if (numberGuardRef.current[from]) {
+      setTimeout(() => {
+        rowGuardRef.current[rowKey] = false;
+      }, 0);
+      return;
+    }
+    numberGuardRef.current[from] = true;
+
+    const next = !Boolean(item.blocked);
+
+    const patchRow = (patch: Partial<RecentItem>) => {
+      setItems((prev) =>
+        prev.map((x, j) => {
+          const same = getRowKey(x, j) === rowKey;
+          return same ? { ...x, ...patch } : x;
+        })
+      );
+    };
+
+    patchRow({ blocked: next });
 
     try {
-      await apiFetch("/app/api/block", {
+      const resp = await apiFetch("/app/api/block", {
         method: "POST",
-        body: JSON.stringify({ from: item.from, blocked: next }),
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from, blocked: next }),
       });
-    } catch {
-      setItems((prev) =>
-        prev.map((x) =>
-          (x.id && item.id && x.id === item.id) ||
-          (x.callSid && item.callSid && x.callSid === item.callSid)
-            ? { ...x, blocked: !next }
-            : x
-        )
-      );
-      Alert.alert("Could not update", "Try again.");
+
+      const ok =
+        resp == null ||
+        typeof resp !== "object" ||
+        !("ok" in resp) ||
+        (resp as any).ok === true;
+
+      if (!ok) {
+        const msg = String((resp as any)?.error || (resp as any)?.message || "block_failed");
+        throw new Error(msg);
+      }
+
+      const serverFrom =
+        resp && typeof resp === "object" ? clean((resp as any).from) || from : from;
+      const serverBlocked =
+        resp && typeof resp === "object" && "blocked" in resp ? !!(resp as any).blocked : next;
+
+      patchRow({ from: serverFrom || undefined, blocked: serverBlocked });
+    } catch (e: any) {
+      patchRow({ blocked: !next });
+      Alert.alert("Could not update", e?.message ? String(e.message) : "Try again.");
+    } finally {
+      setTimeout(() => {
+        rowGuardRef.current[rowKey] = false;
+      }, 0);
+
+      setTimeout(() => {
+        numberGuardRef.current[from] = false;
+      }, 900);
     }
   }, []);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (didInitialLoad.current) return;
     didInitialLoad.current = true;
 
@@ -175,10 +310,7 @@ export default function CallHistoryScreen({ navigation }: any) {
           },
         ]}
       >
-        <ScrollView
-          contentContainerStyle={styles.container}
-          showsVerticalScrollIndicator={false}
-        >
+        <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
             <Text style={styles.title}>Call History</Text>
             <View style={styles.headerRight}>
@@ -205,20 +337,24 @@ export default function CallHistoryScreen({ navigation }: any) {
             {items.length === 0 ? (
               <View style={styles.empty}>
                 <Text style={styles.emptyTitle}>No calls yet</Text>
-                <Text style={styles.emptySub}>
-                  When SNAPI screens calls, they’ll appear here.
-                </Text>
+                <Text style={styles.emptySub}>When SNAPI screens calls, they’ll appear here.</Text>
               </View>
             ) : (
               <View style={styles.list}>
                 {items.map((it, idx) => {
                   const risk = normalizeRisk(it.risk);
                   const dot = riskDotColor(risk);
-                  const who = it.name || it.from || "Unknown";
+
+                  const who = clean(it.status) || clean(it.name) || clean(it.from) || "Unknown";
                   const when = fmtWhen(getWhenField(it));
 
+                  const from = clean(it.from);
+                  const disabled = !!(from && numberGuardRef.current[from]);
+
+                  const hasVm = !!getVoicemailSid(it) || !!getAnyVoicemailUrl(it);
+
                   return (
-                    <View key={getStableKey(it, idx)} style={styles.row}>
+                    <View key={getRowKey(it, idx)} style={styles.row}>
                       <View style={styles.rowTop}>
                         <View style={styles.rowLeft}>
                           <View style={[styles.dot, { backgroundColor: dot }]} />
@@ -233,15 +369,15 @@ export default function CallHistoryScreen({ navigation }: any) {
                         </View>
 
                         <Pressable
-                          onPress={() => toggleBlock(it)}
+                          onPress={() => toggleBlock(it, idx)}
+                          disabled={disabled}
                           style={[
                             styles.blockBtn,
                             it.blocked ? styles.blockBtnOn : styles.blockBtnOff,
+                            disabled ? styles.blockBtnDisabled : null,
                           ]}
                         >
-                          <Text style={styles.blockBtnText}>
-                            {it.blocked ? "Unblock" : "Block"}
-                          </Text>
+                          <Text style={styles.blockBtnText}>{it.blocked ? "Unblock" : "Block"}</Text>
                         </Pressable>
                       </View>
 
@@ -257,15 +393,9 @@ export default function CallHistoryScreen({ navigation }: any) {
 
                       <View style={styles.rowActions}>
                         <GhostButton
-                          title={it.voicemailUrl ? "Voicemail" : "Voicemail N/A"}
-                          onPress={() => {
-                            if (!it.voicemailUrl) return;
-                            navigation?.navigate?.("VoicemailPlayer", {
-                              url: it.voicemailUrl,
-                              item: it,
-                            });
-                          }}
-                          disabled={!it.voicemailUrl}
+                          title={hasVm ? "Voicemail" : "Voicemail N/A"}
+                          onPress={() => openVoicemail(it, idx)}
+                          disabled={!hasVm}
                         />
                         <PrimaryButton
                           title="Details"
@@ -357,7 +487,12 @@ const styles = StyleSheet.create({
     gap: 10,
   },
 
-  blockBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1 },
+  blockBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
   blockBtnOn: {
     borderColor: "rgba(72,255,160,0.35)",
     backgroundColor: "rgba(72,255,160,0.08)",
@@ -365,6 +500,9 @@ const styles = StyleSheet.create({
   blockBtnOff: {
     borderColor: "rgba(255,72,72,0.35)",
     backgroundColor: "rgba(255,72,72,0.08)",
+  },
+  blockBtnDisabled: {
+    opacity: 0.65,
   },
   blockBtnText: { color: Colors.text, fontWeight: "900", fontSize: 11 },
 });
