@@ -8,6 +8,7 @@ import {
   Pressable,
   ActivityIndicator,
   Alert,
+  Linking,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -178,6 +179,8 @@ function dedupeRecent(items: RecentItem[]) {
 
   return Array.from(byKey.values());
 }
+
+const YOUTUBE_START_HERE_URL = "https://youtu.be/5YJ9ae9kr1s";
 
 export default function HomeScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
@@ -358,6 +361,14 @@ export default function HomeScreen({ navigation }: any) {
           {/* HERO */}
           <View style={styles.headerRow}>
             <Text style={styles.heroTitle}>SNAPI Shield</Text>
+
+            <Pressable
+              onPress={() => Linking.openURL(YOUTUBE_START_HERE_URL)}
+              style={styles.youtubeBtn}
+              hitSlop={10}
+            >
+              <Ionicons name="logo-youtube" size={22} color={Colors.text} />
+            </Pressable>
           </View>
 
           <View style={styles.statusRow}>
@@ -761,6 +772,17 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     fontSize: 11,
     letterSpacing: 0.4,
+  },
+
+  youtubeBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.06)",
   },
 
   sectionTitle: {

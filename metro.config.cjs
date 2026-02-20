@@ -1,19 +1,30 @@
-﻿const path = require("path");
+﻿// metro.config.js
+const path = require("path");
 const { getDefaultConfig } = require("expo/metro-config");
 
 const projectRoot = __dirname;
 
 const config = getDefaultConfig(projectRoot);
 
-// Prevent Metro from walking up / resolving unexpected nested copies
-config.resolver.disableHierarchicalLookup = true;
-config.resolver.nodeModulesPaths = [path.resolve(projectRoot, "node_modules")];
+/**
+ * Keep Metro resolution stable without overriding
+ * Expo's hierarchical lookup behavior.
+ *
+ * These aliases prevent duplicate React/RN copies
+ * (which causes "Invalid hook call" errors).
+ */
+config.resolver.nodeModulesPaths = [
+  path.resolve(projectRoot, "node_modules"),
+];
 
-// Hard-alias React + RN to the root copies (prevents invalid hook call)
 config.resolver.extraNodeModules = {
   react: path.resolve(projectRoot, "node_modules/react"),
   "react-native": path.resolve(projectRoot, "node_modules/react-native"),
 };
 
+/**
+ * Ensure Metro watches only this project root
+ */
 config.watchFolders = [projectRoot];
+
 module.exports = config;

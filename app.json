@@ -27,10 +27,12 @@
     "android": {
       "package": "com.snapi.app",
       "permissions": ["POST_NOTIFICATIONS"],
+
       "adaptiveIcon": {
-        "foregroundImage": "./assets/icon.png",
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#050816"
       },
+
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
@@ -39,9 +41,7 @@
       "favicon": "./assets/favicon.png"
     },
 
-    "plugins": [
-      "expo-secure-store"
-    ],
+    "plugins": ["expo-secure-store"],
 
     "extra": {
       "eas": {

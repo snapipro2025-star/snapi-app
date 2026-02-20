@@ -20,10 +20,10 @@ import { PrimaryButton, GhostButton } from "../../components/Buttons";
 
 import { Colors } from "../../theme/colors";
 import { Tokens } from "../../theme/tokens";
+import { getSession } from "../../api/client";
 
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { apiFetch, setTokens } from "../../api/client";
-import { setSetupComplete } from "../../lib/setup";
 
 // RootNavigator param list must include:
 // SecureOtp: { phone: string };
@@ -111,7 +111,6 @@ export default function SecureOtpScreen({ navigation, route }: Props) {
 
           // TEMP DEBUG (remove later)
           try {
-            const { getSession } = await import("../../api/client");
             console.log("[OTP] session after setTokens =", getSession?.());
           } catch (e) {
             console.log("[OTP] session debug failed", e);

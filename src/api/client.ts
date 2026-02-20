@@ -207,7 +207,9 @@ function headersToObject(h?: RequestInit["headers"]): Record<string, string> {
   if (!h) return out;
 
   if (h instanceof Headers) {
-    h.forEach((value, key) => (out[String(key)] = String(value)));
+    h.forEach((value: string, key: string) => {
+      out[String(key)] = String(value);
+    });
     return out;
   }
 
@@ -320,7 +322,7 @@ export async function apiFetch(path: string, init: ApiFetchInit = {}) {
   const method = upperMethod(init.method);
 
   // ✅ Attach Bearer token for /mobile/* routes
-  if (p.startsWith("/mobile/")) {
+  if (p.startsWith("/mobile/") || p.startsWith("/app/api/")) {
     const access = await getAccessToken();
     if (access) headers["Authorization"] = `Bearer ${access}`;
   }
@@ -421,7 +423,7 @@ export async function apiFetch(path: string, init: ApiFetchInit = {}) {
       return await doFetch(headers);
     } catch (e: any) {
       // If /mobile/* is unauthorized, refresh once then retry once
-      if (p.startsWith("/mobile/") && e?.status === 401) {
+      if ((p.startsWith("/mobile/") || p.startsWith("/app/api/")) && e?.status === 401) {
         const ok = await refreshSession();
         if (ok) {
           const access2 = await getAccessToken();
