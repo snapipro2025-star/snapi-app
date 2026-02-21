@@ -23,7 +23,6 @@ import GlassCard from "../components/GlassCard";
 import { Colors } from "../theme/colors";
 import { Tokens } from "../theme/tokens";
 import { apiFetch, BASE_URL } from "../api/client";
-import { formatDialNumber } from "../lib/phone";
 
 function clean(v: any) {
   return String(v ?? "").trim();
@@ -39,10 +38,6 @@ function prettyJson(obj: any) {
 
 const SUPPORT_EMAIL = "support@snapipro.com";
 const YOUTUBE_SETUP_URL = "https://youtu.be/5YJ9ae9kr1s";
-
-// ===== Carrier forwarding codes (Verizon) =====
-const CODE_DISABLE_CCF = "*73";
-const CODE_STATUS_CCF = "*#21#";
 
 // ✅ Must match TWILIO_CALLER_ID (what you want users to save as "SNAPI Intercept")
 const SNAPI_INTERCEPT_NUMBER = "+17204576848";
@@ -83,6 +78,20 @@ export default function SetupHelpScreen({ navigation }: Props) {
   const [snapiNumber, setSnapiNumber] = useState<string | null>(null);
   const [snapiNumberError, setSnapiNumberError] = useState<string | null>(null);
 
+  // --------------------------------------------------
+  // SNAPI Intercept contact helper (LOCKED)
+  // Save Contact → SNAPI Intercept
+  // Number → *71${snapiNumber}
+  // --------------------------------------------------
+  const contactName = "SNAPI Intercept";
+  const contactNumber = useMemo(() => {
+    const n = String(snapiNumber || diag.snapiNumber || "").trim();
+    // Prefer 10-digit formatting for display/use
+    const digits = n.replace(/[^\d]/g, "");
+    const ten = digits.length >= 10 ? digits.slice(-10) : "";
+    return ten ? `*71${ten}` : "";
+  }, [snapiNumber, diag.snapiNumber]);
+
   const [savingContact, setSavingContact] = useState(false);
 
   // ✅ One-time acknowledgement UI state
@@ -114,30 +123,6 @@ export default function SetupHelpScreen({ navigation }: Props) {
       Alert.alert("Copied", `${label}\n\n${text}`);
     } catch {
       Alert.alert("Copy failed", "Couldn’t copy on this device.");
-    }
-  }, []);
-
-  const tryDial = useCallback(async (code: string) => {
-    const url = `tel:${code}`;
-    try {
-      const ok = await Linking.canOpenURL(url);
-      if (ok) await Linking.openURL(url);
-      else Alert.alert("Dial manually", code);
-    } catch {
-      Alert.alert("Dial manually", code);
-    }
-  }, []);
-
-  // Android-only: open call forwarding settings screen (best-effort)
-  const openCallSettings = useCallback(() => {
-    if (Platform.OS !== "android") {
-      Alert.alert("Not available", "Call settings shortcut is Android-only.");
-      return;
-    }
-    try {
-      IntentLauncher.startActivityAsync("android.settings.CALL_SETTINGS");
-    } catch {
-      Alert.alert("Not supported", "Couldn’t open Call Settings on this device.");
     }
   }, []);
 
@@ -427,26 +412,91 @@ export default function SetupHelpScreen({ navigation }: Props) {
             {!!snapiNumberError && <Text style={styles.warnText}>{snapiNumberError}</Text>}
           </GlassCard>
 
-          {/* Carrier setup helpers */}
+          {/* Call Forwarding Setup (Manual) */}
           <GlassCard style={styles.card}>
-            <Text style={styles.cardTitle}>Carrier Forwarding (Verizon)</Text>
+            <Text style={styles.cardTitle}>Call Forwarding Setup</Text>
             <Text style={styles.cardBody}>
-              These are common Verizon codes. If your carrier differs, use the Video button or contact support.
+              SNAPI uses conditional call forwarding. Enter these codes manually in your phone dialer using your SNAPI
+              forwarding number.
             </Text>
 
-            <View style={styles.row}>
-              <Pressable onPress={() => tryDial(CODE_STATUS_CCF)} style={styles.ghostBtn}>
-                <Text style={styles.ghostBtnText}>Status {formatDialNumber(CODE_STATUS_CCF)}</Text>
+            <Text style={styles.mono}>
+              SNAPI Number: {snapiNumber || diag.snapiNumber || "(not loaded)"}
+            </Text>
+
+            {/* SNAPI Intercept contact instructions */}
+            <Text style={styles.mono}>
+              Save Contact → SNAPI Intercept
+            </Text>
+
+            <Text style={styles.mono}>
+              Number → {contactNumber || "*71(loading...)"}
+            </Text>
+
+            {!snapiNumber && !diag.snapiNumber ? (
+              <Text style={styles.warnText}>
+                SNAPI number not loaded yet. Run Diagnostics, then come back here.
+              </Text>
+            ) : null}
+
+            {/* Verizon */}
+            <Text style={[styles.cardBody, { marginTop: 10, fontWeight: "700" }]}>Verizon</Text>
+            <Text style={styles.mono}>Activate (No Answer): *71 + SNAPI number</Text>
+            <Text style={styles.mono}>Deactivate: *73</Text>
+
+            {/* AT&T */}
+            <Text style={[styles.cardBody, { marginTop: 10, fontWeight: "700" }]}>AT&amp;T</Text>
+            <Text style={styles.mono}>Activate (If No Answer): *92 + SNAPI number + #</Text>
+            <Text style={styles.mono}>Deactivate: *73#</Text>
+
+            {/* T-Mobile */}
+            <Text style={[styles.cardBody, { marginTop: 10, fontWeight: "700" }]}>T-Mobile</Text>
+            <Text style={styles.mono}>Activate (If No Answer): **61*SNAPI_NUMBER#</Text>
+            <Text style={styles.mono}>Deactivate all forwarding: ##004#</Text>
+
+            <Text style={[styles.cardBody, { marginTop: 10 }]}>
+              Tip: After enabling, call your phone from another number and ignore the call. It should forward to SNAPI.
+            </Text>
+
+            <View style={[styles.row, { marginTop: 10 }]}>
+              <Pressable
+                onPress={() => copyText("SNAPI Number", String(snapiNumber || diag.snapiNumber || ""))}
+                style={styles.ghostBtn}
+                disabled={!(snapiNumber || diag.snapiNumber)}
+              >
+                <Text style={styles.ghostBtnText}>Copy SNAPI Number</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => copyText("SNAPI Intercept", contactNumber)}
+                style={styles.ghostBtn}
+                disabled={!contactNumber}
+              >
+                <Text style={styles.ghostBtnText}>Copy SNAPI Intercept</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => Linking.openURL("tel:").catch(() => {})}
+                style={styles.primaryBtn}
+              >
+                <Text style={styles.primaryBtnText}>Open Dialer</Text>
               </Pressable>
             </View>
 
             <View style={[styles.row, { marginTop: 10 }]}>
-              <Pressable onPress={() => tryDial(CODE_DISABLE_CCF)} style={styles.dangerBtn}>
-                <Text style={styles.dangerBtnText}>Disable {formatDialNumber(CODE_DISABLE_CCF)}</Text>
+              <Pressable
+                onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent("SNAPI Forwarding Help")}`).catch(() => {})}
+                style={styles.ghostBtn}
+              >
+                <Text style={styles.ghostBtnText}>Need Help?</Text>
               </Pressable>
 
-              <Pressable onPress={openCallSettings} style={styles.ghostBtn}>
-                <Text style={styles.ghostBtnText}>Call Settings</Text>
+              <Pressable
+                onPress={runDiagnostics}
+                disabled={busy}
+                style={[styles.smallBtn, busy && { opacity: 0.6 }]}
+              >
+                <Text style={styles.smallBtnText}>{busy ? "Running..." : "Run Diagnostics"}</Text>
               </Pressable>
             </View>
           </GlassCard>
