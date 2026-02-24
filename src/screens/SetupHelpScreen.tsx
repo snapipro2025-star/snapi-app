@@ -385,39 +385,11 @@ export default function SetupHelpScreen({ navigation }: Props) {
             </GlassCard>
           )}
 
-          {/* Diagnostics */}
-          <GlassCard style={styles.card}>
-            <View style={styles.cardTopRow}>
-              <Text style={styles.cardTitle}>Diagnostics</Text>
-              <Pressable onPress={runDiagnostics} disabled={busy} style={[styles.smallBtn, busy && { opacity: 0.6 }]}>
-                <Text style={styles.smallBtnText}>{busy ? "Running..." : "Run"}</Text>
-              </Pressable>
-            </View>
-
-            <Text style={styles.mono}>
-              {prettyJson({
-                BASE_URL: clean(BASE_URL),
-                platform: diag.platform,
-                deviceId: diag.deviceId,
-                version: diag.version,
-                build: diag.build,
-                ping: { ok: diag.pingOk, status: diag.pingStatus, echo: diag.pingEcho },
-                health: { ok: diag.healthOk, status: diag.healthStatus, echo: diag.healthEcho },
-                snapiNumber: snapiNumber || diag.snapiNumber || "",
-                ts: diag.ts,
-                error: diag.error || "",
-              })}
-            </Text>
-
-            {!!snapiNumberError && <Text style={styles.warnText}>{snapiNumberError}</Text>}
-          </GlassCard>
-
           {/* Call Forwarding Setup (Manual) */}
           <GlassCard style={styles.card}>
             <Text style={styles.cardTitle}>Call Forwarding Setup</Text>
             <Text style={styles.cardBody}>
-              SNAPI uses conditional call forwarding. Enter these codes manually in your phone dialer using your SNAPI
-              forwarding number.
+              SNAPI uses conditional call forwarding. Enter the following codes manually in your phone dialer using your SNAPI number.
             </Text>
 
             <Text style={styles.mono}>
@@ -427,10 +399,6 @@ export default function SetupHelpScreen({ navigation }: Props) {
             {/* SNAPI Intercept contact instructions */}
             <Text style={styles.mono}>
               Save Contact → SNAPI Intercept
-            </Text>
-
-            <Text style={styles.mono}>
-              Number → {contactNumber || "*71(loading...)"}
             </Text>
 
             {!snapiNumber && !diag.snapiNumber ? (
@@ -460,47 +428,13 @@ export default function SetupHelpScreen({ navigation }: Props) {
 
             <View style={[styles.row, { marginTop: 10 }]}>
               <Pressable
-                onPress={() => copyText("SNAPI Number", String(snapiNumber || diag.snapiNumber || ""))}
-                style={styles.ghostBtn}
-                disabled={!(snapiNumber || diag.snapiNumber)}
-              >
-                <Text style={styles.ghostBtnText}>Copy SNAPI Number</Text>
-              </Pressable>
-
-              <Pressable
-                onPress={() => copyText("SNAPI Intercept", contactNumber)}
-                style={styles.ghostBtn}
-                disabled={!contactNumber}
-              >
-                <Text style={styles.ghostBtnText}>Copy SNAPI Intercept</Text>
-              </Pressable>
-
-              <Pressable
                 onPress={() => Linking.openURL("tel:").catch(() => {})}
                 style={styles.primaryBtn}
               >
                 <Text style={styles.primaryBtnText}>Open Dialer</Text>
               </Pressable>
             </View>
-
-            <View style={[styles.row, { marginTop: 10 }]}>
-              <Pressable
-                onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent("SNAPI Forwarding Help")}`).catch(() => {})}
-                style={styles.ghostBtn}
-              >
-                <Text style={styles.ghostBtnText}>Need Help?</Text>
-              </Pressable>
-
-              <Pressable
-                onPress={runDiagnostics}
-                disabled={busy}
-                style={[styles.smallBtn, busy && { opacity: 0.6 }]}
-              >
-                <Text style={styles.smallBtnText}>{busy ? "Running..." : "Run Diagnostics"}</Text>
-              </Pressable>
-            </View>
           </GlassCard>
-
           {/* Support */}
           <GlassCard style={styles.card}>
             <Text style={styles.cardTitle}>Support</Text>
@@ -517,6 +451,33 @@ export default function SetupHelpScreen({ navigation }: Props) {
                 <Text style={styles.primaryBtnText}>Email Support</Text>
               </Pressable>
             </View>
+          </GlassCard>
+
+          {/* Diagnostics */}
+          <GlassCard style={styles.card}>
+            <View style={styles.cardTopRow}>
+              <Text style={styles.cardTitle}>Diagnostics</Text>
+              <Pressable onPress={runDiagnostics} disabled={busy} style={[styles.smallBtn, busy && { opacity: 0.6 }]}>
+                <Text style={styles.smallBtnText}>{busy ? "Running..." : "Run"}</Text>
+              </Pressable>
+            </View>
+
+            <Text style={styles.mono}>
+              {prettyJson({
+                BASE_URL: clean(BASE_URL),
+                platform: diag.platform,
+                deviceId: diag.deviceId,
+                version: diag.version,
+                build: diag.build,
+                ping: { ok: diag.pingOk, status: diag.pingStatus, echo: diag.pingEcho },
+                health: { ok: diag.healthOk, status: diag.healthStatus, echo: diag.healthEcho },
+                snapiNumber: snapiNumber || diag.snapiNumber || "",
+                ts: diag.ts,
+                error: diag.error || "",
+              })}
+            </Text>
+
+            {!!snapiNumberError && <Text style={styles.warnText}>{snapiNumberError}</Text>}
           </GlassCard>
 
           <View style={{ height: 16 }} />

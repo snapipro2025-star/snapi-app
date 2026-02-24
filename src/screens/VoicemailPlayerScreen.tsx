@@ -181,57 +181,80 @@ export default function VoicemailPlayerScreen({ route, navigation }: Props) {
   }, [fallbackUrl, hasRecordingSid, recordingSid]);
 
   /**
-   * Download to cache when possible, otherwise stream directly.
-   * Uses createDownloadResumable so we can show progress.
+   * Download to local cache ALWAYS (when FS is available).
+   * Then validate we didn't download HTML/JSON/401 pages.
    */
-  const downloadToCacheOrStream = useCallback(
+  const downloadToCacheStrict = useCallback(
     async (url: string): Promise<string> => {
-      if (!fsOk) return url;
+      if (!fsOk) throw new Error("FileSystem unavailable on this build.");
 
       const base = String(FS?.cacheDirectory || FS?.documentDirectory || "");
-      if (!base) return url;
+      if (!base) throw new Error("Cache directory unavailable.");
 
       const safeId = recordingSid ? recordingSid.replace(/[^a-zA-Z0-9_\-]/g, "") : String(Date.now());
-      const filename = `snapi_vm_${safeId}.mp3`;
+
+      // Try to preserve extension if present (twilio sometimes uses .mp3 or .wav)
+      const extMatch = url.split("?")[0].match(/\.(mp3|m4a|aac|wav)$/i);
+      const ext = (extMatch?.[1] || "mp3").toLowerCase();
+
+      const filename = `snapi_vm_${safeId}.${ext}`;
       const dest = base + filename;
 
+      // reset progress UI
+      setPhase("downloading");
+      setDownloadPct(0);
+      setDownloadBytes({ written: 0, expected: 0 });
+
+      // Ensure old file removed
       try {
         if (FS?.deleteAsync) await FS.deleteAsync(dest, { idempotent: true }).catch(() => {});
-        cacheUriRef.current = dest;
+      } catch {}
+      cacheUriRef.current = dest;
 
-        setPhase("downloading");
-        setDownloadPct(0);
-        setDownloadBytes({ written: 0, expected: 0 });
+      const onProgress = (p: any) => {
+        if (!mountedRef.current) return;
+        const written = Number(p?.totalBytesWritten || 0);
+        const expected = Number(p?.totalBytesExpectedToWrite || 0);
+        setDownloadBytes({ written, expected });
+        setDownloadPct(pct(written, expected));
+      };
 
-        const onProgress = (p: any) => {
-          if (!mountedRef.current) return;
-          const written = Number(p?.totalBytesWritten || 0);
-          const expected = Number(p?.totalBytesExpectedToWrite || 0);
-          setDownloadBytes({ written, expected });
-          setDownloadPct(pct(written, expected));
-        };
+      if (!FS?.createDownloadResumable) throw new Error("Download API unavailable.");
 
-        if (!FS?.createDownloadResumable) return url;
+      const dl = FS.createDownloadResumable(url, dest, {}, onProgress);
+      dlRef.current = dl;
 
-        const dl = FS.createDownloadResumable(url, dest, {}, onProgress);
-        dlRef.current = dl;
-
-        const result = await dl.downloadAsync();
+      let result: any = null;
+      try {
+        result = await dl.downloadAsync();
+      } finally {
         dlRef.current = null;
-
-        const downloadedUri = result?.uri ? String(result.uri) : "";
-        if (!downloadedUri) return url;
-
-        const info = FS?.getInfoAsync ? await FS.getInfoAsync(downloadedUri) : null;
-        const size = Number(info?.size || 0);
-
-        if (!info?.exists || size < 128) return url;
-
-        return downloadedUri;
-      } catch {
-        dlRef.current = null;
-        return url;
       }
+
+      const downloadedUri = result?.uri ? String(result.uri) : "";
+      if (!downloadedUri) throw new Error("Download failed (no file).");
+
+      const info = FS?.getInfoAsync ? await FS.getInfoAsync(downloadedUri, { size: true }) : null;
+      const exists = Boolean(info?.exists);
+      const size = Number((info as any)?.size || 0);
+
+      // If it's tiny, it's almost certainly not audio (often HTML/JSON/error payload)
+      if (!exists || size < 2000) {
+        // Attempt to read a small text head for debugging (best-effort)
+        let head = "";
+        try {
+          if (FS?.readAsStringAsync) {
+            head = await FS.readAsStringAsync(downloadedUri, { encoding: FS.EncodingType.UTF8 });
+            head = String(head || "").slice(0, 160);
+          }
+        } catch {}
+
+        throw new Error(
+          `Downloaded file is not valid audio (size=${size}).` + (head ? ` Head: ${head}` : "")
+        );
+      }
+
+      return downloadedUri;
     },
     [FS, fsOk, recordingSid]
   );
@@ -275,10 +298,11 @@ export default function VoicemailPlayerScreen({ route, navigation }: Props) {
       const url = await resolvePlaybackUrl();
       if (!mountedRef.current) return;
 
-      const uri = await downloadToCacheOrStream(url);
+      // ✅ Always download then play local (prevents garbled streaming)
+      const localUri = await downloadToCacheStrict(url);
       if (!mountedRef.current) return;
 
-      await loadIntoPlayer(uri);
+      await loadIntoPlayer(localUri);
     } catch (e: any) {
       const msg = pickErrMsg(e);
       setErrMsg(msg);
@@ -290,7 +314,7 @@ export default function VoicemailPlayerScreen({ route, navigation }: Props) {
     busy,
     cancelDownload,
     cleanupCacheFile,
-    downloadToCacheOrStream,
+    downloadToCacheStrict,
     hasAnySource,
     loadIntoPlayer,
     resolvePlaybackUrl,
@@ -356,12 +380,13 @@ export default function VoicemailPlayerScreen({ route, navigation }: Props) {
   const onPressInfo = useCallback(() => {
     const lines = [
       `Source: ${sourceText}`,
-      `FS: ${fsOk ? "ok" : "stream"}`,
+      `FS: ${fsOk ? "download" : "no-fs"}`,
       `Phase: ${phase}`,
+      `DL: ${downloadPct}% (${downloadBytes.written}/${downloadBytes.expected || 0})`,
       errMsg ? `Error: ${errMsg}` : "",
     ].filter(Boolean);
     Alert.alert("Voicemail Info", lines.join("\n"));
-  }, [errMsg, fsOk, phase, sourceText]);
+  }, [downloadBytes.expected, downloadBytes.written, downloadPct, errMsg, fsOk, phase, sourceText]);
 
   return (
     <GlassBackground>

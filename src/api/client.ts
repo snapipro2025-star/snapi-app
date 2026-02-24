@@ -10,7 +10,7 @@ import * as SecureStore from "expo-secure-store";
  *
  * NOTE: Local LAN / localhost intentionally not supported.
  */
-const DEFAULT_PROD_URL = "https://www.snapipro.com";
+const DEFAULT_PROD_URL = "https://api.snapipro.com";
 
 // ------------------------------
 // Helpers
@@ -47,7 +47,12 @@ const ENV_URL = clean(process.env.EXPO_PUBLIC_API_BASE_URL || process.env.EXPO_P
 export const BASE_URL = ENV_URL || DEFAULT_PROD_URL;
 
 // App-level auth for /app/api/* routes
-const APP_KEY = clean(process.env.EXPO_PUBLIC_SNAPI_APP_KEY);
+// Support multiple env names so builds don’t silently break
+const APP_KEY = clean(
+  process.env.EXPO_PUBLIC_SNAPI_APP_KEY ||
+    process.env.EXPO_PUBLIC_MOBILE_KEY || // ✅ your current naming
+    process.env.EXPO_PUBLIC_APP_KEY // optional fallback
+);
 
 // Debug (safe): do not leak full key
 console.log("[api] BASE_URL =", BASE_URL);
@@ -178,12 +183,21 @@ export async function refreshSession(): Promise<boolean> {
       timeoutMs: 12000,
     });
 
-    if (r?.ok === false) return false;
+    if ((r as any)?.ok === false) return false;
 
     const accessToken =
-      r?.accessToken || r?.access_token || r?.token || r?.access || r?.session?.accessToken || "";
+      (r as any)?.accessToken ||
+      (r as any)?.access_token ||
+      (r as any)?.token ||
+      (r as any)?.access ||
+      (r as any)?.session?.accessToken ||
+      "";
     const refreshToken =
-      r?.refreshToken || r?.refresh_token || r?.refresh || r?.session?.refreshToken || "";
+      (r as any)?.refreshToken ||
+      (r as any)?.refresh_token ||
+      (r as any)?.refresh ||
+      (r as any)?.session?.refreshToken ||
+      "";
 
     if (!accessToken || !refreshToken) return false;
 
@@ -222,11 +236,7 @@ function headersToObject(h?: RequestInit["headers"]): Record<string, string> {
   return out;
 }
 
-function buildHeaders(
-  initHeaders: RequestInit["headers"] | undefined,
-  deviceId: string,
-  hasBody: boolean
-) {
+function buildHeaders(initHeaders: RequestInit["headers"] | undefined, deviceId: string, hasBody: boolean) {
   const merged: Record<string, string> = headersToObject(initHeaders);
 
   // Defaults
@@ -302,36 +312,45 @@ function parseJsonBody(body: any) {
  * - Retries /mobile/* once on 401 after refreshSession()
  */
 export async function apiFetch(path: string, init: ApiFetchInit = {}) {
-  const p = clean(path);
-  const url = joinUrl(BASE_URL, p);
+  const cfg: ApiFetchInit = init ?? {};
 
-  // Fail fast: /app/api/* requires app key
-  if (p.startsWith("/app/api/") && !APP_KEY) {
+  // --- Launch safety: never use marketing host for API ---
+  const rawBase = clean(BASE_URL);
+
+  const isMarketingHost =
+    /(^|\/\/)(www\.)?snapipro\.com(\/|$)/i.test(rawBase) && !/\/\/api\.snapipro\.com/i.test(rawBase);
+
+  const effectiveBase = isMarketingHost ? "https://api.snapipro.com" : rawBase;
+
+  const url = joinUrl(effectiveBase, path);
+
+  // --- Fail fast: /app/api/* requires app key ---
+  if (path.startsWith("/app/api/") && !APP_KEY) {
     throw makeError("App key missing (EXPO_PUBLIC_SNAPI_APP_KEY).", {
       code: "MISSING_APP_KEY",
-      path: p,
+      path,
       url,
       baseUrl: BASE_URL,
     });
   }
 
   const deviceId = await getDeviceId();
-  const hasBody = init.body !== undefined && init.body !== null;
+  const hasBody = cfg.body !== undefined && cfg.body !== null;
 
-  const headers = buildHeaders(init.headers, deviceId, Boolean(hasBody));
-  const method = upperMethod(init.method);
+  const headers = buildHeaders(cfg.headers, deviceId, Boolean(hasBody));
+  const method = upperMethod(cfg.method);
 
-  // ✅ Attach Bearer token for /mobile/* routes
-  if (p.startsWith("/mobile/") || p.startsWith("/app/api/")) {
+  // ✅ Attach Bearer token for /mobile/* and /app/api/*
+  if (path.startsWith("/mobile/") || path.startsWith("/app/api/")) {
     const access = await getAccessToken();
     if (access) headers["Authorization"] = `Bearer ${access}`;
   }
 
-  const timeoutMs = Number(init.timeoutMs ?? 12000);
+  const timeoutMs = Number(cfg.timeoutMs ?? 12000);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  const quiet = Boolean(init.quiet);
+  const quiet = Boolean(cfg.quiet);
 
   const doFetch = async (hdrs: Record<string, string>) => {
     if (!quiet) {
@@ -339,7 +358,7 @@ export async function apiFetch(path: string, init: ApiFetchInit = {}) {
     }
 
     const res = await fetch(url, {
-      ...init,
+      ...cfg,
       method,
       headers: hdrs,
       signal: controller.signal,
@@ -355,7 +374,7 @@ export async function apiFetch(path: string, init: ApiFetchInit = {}) {
       }
 
       const message =
-        (data && typeof data === "object" && ((data as any).error || (data as any).message)) ||
+        (data && typeof data === "object" && (((data as any).error as any) || ((data as any).message as any))) ||
         `Request failed (${res.status})`;
 
       throw makeError(message, {
@@ -363,7 +382,7 @@ export async function apiFetch(path: string, init: ApiFetchInit = {}) {
         body: data,
         code: (data && typeof data === "object" && (data as any).code) || undefined,
         url,
-        path: p,
+        path,
         baseUrl: BASE_URL,
       });
     }
@@ -375,9 +394,9 @@ export async function apiFetch(path: string, init: ApiFetchInit = {}) {
     // ------------------------------
     // SNAPI: prevent double-fire for block/unblock
     // ------------------------------
-    const isBlock = p === "/app/api/block" && method === "POST";
+    const isBlock = path === "/app/api/block" && method === "POST";
     if (isBlock) {
-      const bodyObj = parseJsonBody(init.body);
+      const bodyObj = parseJsonBody(cfg.body);
       const from = clean(bodyObj?.from);
       const blocked = !!bodyObj?.blocked;
 
@@ -422,8 +441,8 @@ export async function apiFetch(path: string, init: ApiFetchInit = {}) {
     try {
       return await doFetch(headers);
     } catch (e: any) {
-      // If /mobile/* is unauthorized, refresh once then retry once
-      if ((p.startsWith("/mobile/") || p.startsWith("/app/api/")) && e?.status === 401) {
+      // If /mobile/* or /app/api/* is unauthorized, refresh once then retry once
+      if ((path.startsWith("/mobile/") || path.startsWith("/app/api/")) && e?.status === 401) {
         const ok = await refreshSession();
         if (ok) {
           const access2 = await getAccessToken();
@@ -444,16 +463,13 @@ export async function apiFetch(path: string, init: ApiFetchInit = {}) {
       clean(e?.message).toLowerCase().includes("aborted") ||
       clean(e?.message).toLowerCase().includes("timeout");
 
-    throw makeError(
-      aborted ? "Server not reachable. Please try again." : "Network error. Check connectivity and try again.",
-      {
-        cause: e,
-        code: aborted ? "TIMEOUT" : "NETWORK_ERROR",
-        url,
-        path: p,
-        baseUrl: BASE_URL,
-      }
-    );
+    throw makeError(aborted ? "Server not reachable. Please try again." : "Network error. Check connectivity and try again.", {
+      cause: e,
+      code: aborted ? "TIMEOUT" : "NETWORK_ERROR",
+      url,
+      path,
+      baseUrl: BASE_URL,
+    });
   } finally {
     clearTimeout(timer);
   }
