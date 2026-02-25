@@ -150,7 +150,7 @@ export default function CallHistoryScreen({ navigation }: any) {
   const load = useCallback(async () => {
     try {
       setRefreshing(true);
-      const rRecent = await apiFetch("/app/api/recent", { method: "GET" });
+      const rRecent = await apiFetch("/mobile/recent", { method: "GET" })
       setItems(extractRecentList(rRecent));
     } catch (e: any) {
       Alert.alert("Refresh failed", e?.message || "Please try again.");

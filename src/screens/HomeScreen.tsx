@@ -245,7 +245,7 @@ export default function HomeScreen({ navigation }: any) {
 
       const [mobileRes, recentRes] = await Promise.allSettled([
         apiFetch("/mobile/refresh", { method: "GET" }),
-        apiFetch("/app/api/recent", { method: "GET" }),
+        apiFetch("/mobile/recent", { method: "GET" })
       ]);
 
       if (mobileRes.status === "fulfilled") {

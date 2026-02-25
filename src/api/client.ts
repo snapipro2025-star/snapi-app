@@ -88,16 +88,28 @@ const REFRESH_KEY = "snapi_refresh_token";
 
 export async function getAccessToken(): Promise<string | null> {
   try {
-    return await SecureStore.getItemAsync(ACCESS_KEY);
-  } catch {
+    const token = await SecureStore.getItemAsync(ACCESS_KEY);
+
+    // TEMP DEBUG: print token (remove after testing)
+    console.log("[auth] access token", token ? `${token.slice(0, 18)}...${token.slice(-10)}` : "(null)");
+
+    return token;
+  } catch (e) {
+    console.log("[auth] getAccessToken error", e);
     return null;
   }
 }
 
 export async function getRefreshToken(): Promise<string | null> {
   try {
-    return await SecureStore.getItemAsync(REFRESH_KEY);
-  } catch {
+    const token = await SecureStore.getItemAsync(REFRESH_KEY);
+
+    // TEMP DEBUG (optional)
+    console.log("[auth] refresh token", token ? `${token.slice(0, 18)}...${token.slice(-10)}` : "(null)");
+
+    return token;
+  } catch (e) {
+    console.log("[auth] getRefreshToken error", e);
     return null;
   }
 }
@@ -170,11 +182,12 @@ export async function clearTokens() {
  */
 export async function refreshSession(): Promise<boolean> {
   const refresh = await getRefreshToken();
-  if (!refresh) return false;
+  if (!refresh) {
+    console.log("[refreshSession] no refresh token");
+    return false;
+  }
 
   try {
-    // Note: refresh endpoint might or might not require Authorization.
-    // We call it quiet, and it will include x-snapi-app-key + device headers.
     const r = await apiFetch("/mobile/auth/refresh", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -183,7 +196,10 @@ export async function refreshSession(): Promise<boolean> {
       timeoutMs: 12000,
     });
 
-    if ((r as any)?.ok === false) return false;
+    if ((r as any)?.ok === false) {
+      console.log("[refreshSession] backend returned ok:false");
+      return false;
+    }
 
     const accessToken =
       (r as any)?.accessToken ||
@@ -192,18 +208,30 @@ export async function refreshSession(): Promise<boolean> {
       (r as any)?.access ||
       (r as any)?.session?.accessToken ||
       "";
-    const refreshToken =
+
+    // Refresh token rotation is OPTIONAL — keep the existing one if not provided
+    const newRefreshToken =
       (r as any)?.refreshToken ||
       (r as any)?.refresh_token ||
       (r as any)?.refresh ||
       (r as any)?.session?.refreshToken ||
       "";
 
-    if (!accessToken || !refreshToken) return false;
+    if (!accessToken) {
+      console.log("[refreshSession] missing accessToken in response");
+      return false;
+    }
 
-    await setTokens(accessToken, refreshToken);
+    const finalRefresh = newRefreshToken || refresh;
+
+    console.log("[refreshSession] success", {
+      rotatedRefresh: !!newRefreshToken,
+    });
+
+    await setTokens(accessToken, finalRefresh);
     return true;
-  } catch {
+  } catch (e) {
+    console.log("[refreshSession] error", e instanceof Error ? e.message : String(e));
     return false;
   }
 }
