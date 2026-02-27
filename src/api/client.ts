@@ -1,5 +1,6 @@
 // src/api/client.ts
 import * as SecureStore from "expo-secure-store";
+export type ApiFetchResult = any;
 
 /**
  * SNAPI API Client (cloud-only)
@@ -15,28 +16,28 @@ const DEFAULT_PROD_URL = "https://api.snapipro.com";
 // ------------------------------
 // Helpers
 // ------------------------------
-function clean(s: any) {
+function clean(s: unknown): string {
   return String(s ?? "").trim();
 }
 
-function joinUrl(base: string, path: string) {
+function joinUrl(base: string, path: string): string {
   const b = clean(base).replace(/\/+$/, "");
-  const p = clean(path);
-  return `${b}${p.startsWith("/") ? p : `/${p}`}`;
+  const p = clean(path).replace(/^\/+/, ""); // prevent double slashes
+  return `${b}/${p}`;
 }
 
-function upperMethod(m?: string) {
+function upperMethod(m?: string): string {
   return clean(m || "GET").toUpperCase();
 }
 
-function safePreview(s: string, n = 1200) {
-  const t = String(s || "");
+function safePreview(s: unknown, n = 1200): string {
+  const t = String(s ?? "");
   return t.length > n ? `${t.slice(0, n)}…` : t;
 }
 
-function makeError(message: string, extra?: any) {
-  const err: any = new Error(message);
-  if (extra && typeof extra === "object") Object.assign(err, extra);
+function makeError(message: string, extra?: unknown): Error & Record<string, unknown> {
+  const err = new Error(message) as Error & Record<string, unknown>;
+  if (extra && typeof extra === "object") Object.assign(err, extra as object);
   return err;
 }
 
@@ -54,9 +55,11 @@ const APP_KEY = clean(
     process.env.EXPO_PUBLIC_APP_KEY // optional fallback
 );
 
-// Debug (safe): do not leak full key
-console.log("[api] BASE_URL =", BASE_URL);
-console.log("[api] APP_KEY len =", APP_KEY.length, "| prefix =", APP_KEY ? APP_KEY.slice(0, 3) : "(none)");
+// Debug (safe): do not leak keys in production builds
+if (__DEV__) {
+  console.log("[api] BASE_URL =", BASE_URL);
+  console.log("[api] APP_KEY len =", APP_KEY.length, "| prefix =", APP_KEY ? APP_KEY.slice(0, 3) : "(none)");
+}
 
 // ------------------------------
 // Device ID (persisted)
@@ -91,7 +94,7 @@ export async function getAccessToken(): Promise<string | null> {
     const token = await SecureStore.getItemAsync(ACCESS_KEY);
 
     // TEMP DEBUG: print token (remove after testing)
-    console.log("[auth] access token", token ? `${token.slice(0, 18)}...${token.slice(-10)}` : "(null)");
+    console.log("[auth] access token", token ? `len=${token.length}` : "(null)");
 
     return token;
   } catch (e) {
@@ -105,7 +108,7 @@ export async function getRefreshToken(): Promise<string | null> {
     const token = await SecureStore.getItemAsync(REFRESH_KEY);
 
     // TEMP DEBUG (optional)
-    console.log("[auth] refresh token", token ? `${token.slice(0, 18)}...${token.slice(-10)}` : "(null)");
+    console.log("[auth] refresh token", token ? `len=${token.length}` : "(null)");
 
     return token;
   } catch (e) {
@@ -172,14 +175,46 @@ export async function clearTokens() {
     await SecureStore.deleteItemAsync(REFRESH_KEY);
   } catch {}
 
-  // ✅ keep in-memory session consistent immediately
   _session = { hydrated: true, isAuthed: false };
 }
 
+/* ================================
+   Refresh storm protection
+================================ */
+
+let _refreshInflight: Promise<boolean> | null = null;
+let _refreshLastAt = 0;
+const REFRESH_DEBOUNCE_MS = 1500;
+
 /**
- * Refresh session by calling your backend refresh endpoint.
- * Returns true if refresh succeeded and tokens are updated.
+ * Ensures only one refresh runs at a time, and repeated calls
+ * within a short window don't hammer /mobile/auth/refresh.
  */
+export async function refreshSessionOnce(): Promise<boolean> {
+  const now = Date.now();
+
+  if (_refreshInflight) return _refreshInflight;
+
+  if (now - _refreshLastAt < REFRESH_DEBOUNCE_MS) {
+    // "recently attempted" — don't claim success
+    return false;
+  }
+
+  _refreshLastAt = now;
+
+  _refreshInflight = (async () => {
+    try {
+      return await refreshSession(); // ✅ correct
+    } finally {
+      _refreshInflight = null;
+    }
+  })();
+
+  return _refreshInflight;
+}
+
+/* existing function continues below */
+
 export async function refreshSession(): Promise<boolean> {
   const refresh = await getRefreshToken();
   if (!refresh) {
@@ -188,33 +223,62 @@ export async function refreshSession(): Promise<boolean> {
   }
 
   try {
-    const r = await apiFetch("/mobile/auth/refresh", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken: refresh }),
-      quiet: true,
-      timeoutMs: 12000,
-    });
+    const deviceId = await getDeviceId();
 
-    if ((r as any)?.ok === false) {
+    // Use the same “marketing host safety” logic as apiFetch
+    const rawBase = clean(BASE_URL);
+    const isMarketingHost =
+      /(^|\/\/)(www\.)?snapipro\.com(\/|$)/i.test(rawBase) && !/\/\/api\.snapipro\.com/i.test(rawBase);
+    const effectiveBase = isMarketingHost ? "https://api.snapipro.com" : rawBase;
+
+    const url = joinUrl(effectiveBase, "/mobile/auth/refresh");
+
+    // Build headers (NO Authorization header here)
+    const headers = buildHeaders({ "Content-Type": "application/json" }, deviceId, true);
+
+    // Helpful for tracking refresh storms without leaking secrets
+    console.log("[auth][refresh] -> POST", url);
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ refreshToken: refresh }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const data = await readBodySafely(res);
+
+    if (!res.ok) {
+      console.log("[refreshSession] HTTP fail", res.status, typeof data === "string" ? safePreview(data) : data);
+      return false;
+    }
+
+    if ((data as any)?.ok === false) {
       console.log("[refreshSession] backend returned ok:false");
       return false;
     }
 
     const accessToken =
-      (r as any)?.accessToken ||
-      (r as any)?.access_token ||
-      (r as any)?.token ||
-      (r as any)?.access ||
-      (r as any)?.session?.accessToken ||
+      (data as any)?.accessToken ||
+      (data as any)?.access_token ||
+      (data as any)?.token ||
+      (data as any)?.access ||
+      (data as any)?.session?.accessToken ||
       "";
 
-    // Refresh token rotation is OPTIONAL — keep the existing one if not provided
     const newRefreshToken =
-      (r as any)?.refreshToken ||
-      (r as any)?.refresh_token ||
-      (r as any)?.refresh ||
-      (r as any)?.session?.refreshToken ||
+      (data as any)?.refreshToken ||
+      (data as any)?.refresh_token ||
+      (data as any)?.refresh ||
+      (data as any)?.session?.refreshToken ||
       "";
 
     if (!accessToken) {
@@ -224,14 +288,17 @@ export async function refreshSession(): Promise<boolean> {
 
     const finalRefresh = newRefreshToken || refresh;
 
-    console.log("[refreshSession] success", {
-      rotatedRefresh: !!newRefreshToken,
-    });
+    console.log("[refreshSession] success", { rotatedRefresh: !!newRefreshToken });
 
     await setTokens(accessToken, finalRefresh);
     return true;
-  } catch (e) {
-    console.log("[refreshSession] error", e instanceof Error ? e.message : String(e));
+  } catch (e: any) {
+    const aborted =
+      e?.name === "AbortError" ||
+      clean(e?.message).toLowerCase().includes("aborted") ||
+      clean(e?.message).toLowerCase().includes("timeout");
+
+    console.log("[refreshSession] error", aborted ? "timeout" : e instanceof Error ? e.message : String(e));
     return false;
   }
 }
@@ -298,11 +365,24 @@ function buildHeaders(initHeaders: RequestInit["headers"] | undefined, deviceId:
 // ------------------------------
 async function readBodySafely(res: Response) {
   const contentType = res.headers.get("content-type") || "";
-  const isJson = contentType.includes("application/json");
+  const looksJson = contentType.includes("json") || contentType.includes("+json");
 
   try {
-    if (isJson) return await res.json();
-    return await res.text();
+    // 204 / empty body safety
+    if (res.status === 204) return null;
+
+    const text = await res.text();
+    if (!text) return null;
+
+    if (looksJson) {
+      try {
+        return JSON.parse(text);
+      } catch {
+        // fall through
+      }
+    }
+
+    return text;
   } catch {
     return null;
   }
@@ -329,34 +409,40 @@ function parseJsonBody(body: any) {
 
 /**
  * apiFetch(path, init)
- * - Prefixes BASE_URL
+ * - Prefixes BASE_URL (and guards against marketing host)
  * - Adds x-snapi-device-id header
  * - Adds x-snapi-app-key when present
- * - Adds Authorization: Bearer <accessToken> for /mobile/* routes (fixes 401 on mobile rules)
+ * - Adds Authorization: Bearer <accessToken> for /mobile/* and /app/api/*
  * - Enforces app key presence for /app/api/* calls (fail-fast)
  * - Uses AbortController timeout so calls don't hang forever on real devices
  * - Throws a rich Error for non-2xx (and does NOT mask it as "network error")
  * - Debounces + de-dupes /app/api/block to prevent accidental double-toggle
- * - Retries /mobile/* once on 401 after refreshSession()
+ * - Retries /mobile/* once on 401 after refreshSessionOnce() (rebuilds headers w/ NEW token)
  */
-export async function apiFetch(path: string, init: ApiFetchInit = {}) {
+export async function apiFetch(
+  path: string,
+  init: ApiFetchInit = {}
+): Promise<ApiFetchResult> {
   const cfg: ApiFetchInit = init ?? {};
+
+  // ✅ One-shot retry guard for 401 refresh flow
+  const alreadyRetried = (cfg as any)?._snapiRetried === true;
 
   // --- Launch safety: never use marketing host for API ---
   const rawBase = clean(BASE_URL);
-
   const isMarketingHost =
-    /(^|\/\/)(www\.)?snapipro\.com(\/|$)/i.test(rawBase) && !/\/\/api\.snapipro\.com/i.test(rawBase);
+    /(^|\/\/)(www\.)?snapipro\.com(\/|$)/i.test(rawBase) &&
+    !/\/\/api\.snapipro\.com/i.test(rawBase);
 
   const effectiveBase = isMarketingHost ? "https://api.snapipro.com" : rawBase;
-
-  const url = joinUrl(effectiveBase, path);
+  const p = clean(path);
+  const url = joinUrl(effectiveBase, p);
 
   // --- Fail fast: /app/api/* requires app key ---
-  if (path.startsWith("/app/api/") && !APP_KEY) {
+  if (p.startsWith("/app/api/") && !APP_KEY) {
     throw makeError("App key missing (EXPO_PUBLIC_SNAPI_APP_KEY).", {
       code: "MISSING_APP_KEY",
-      path,
+      path: p,
       url,
       baseUrl: BASE_URL,
     });
@@ -365,64 +451,112 @@ export async function apiFetch(path: string, init: ApiFetchInit = {}) {
   const deviceId = await getDeviceId();
   const hasBody = cfg.body !== undefined && cfg.body !== null;
 
-  const headers = buildHeaders(cfg.headers, deviceId, Boolean(hasBody));
   const method = upperMethod(cfg.method);
+  const quiet = Boolean(cfg.quiet);
+
+  const timeoutMs = Number(cfg.timeoutMs ?? 12000);
+
+  // NOTE: controller must be per-attempt (including retries), so create inside doFetchAttempt.
+
+  const doFetchAttempt = async (
+    hdrs: Record<string, string>
+  ): Promise<ApiFetchResult> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      if (!quiet) {
+        console.log("[api] ->", method, url, "| keyLen=", APP_KEY.length, "| device=", deviceId);
+      }
+
+      const res = await fetch(url, {
+        ...cfg,
+        method,
+        headers: hdrs,
+        signal: controller.signal,
+      });
+
+      if (!quiet) console.log("[api] <-", res.status, res.ok ? "OK" : "ERR", url);
+
+      const data = await readBodySafely(res);
+
+      if (!res.ok) {
+        // ✅ Retry /mobile/* once on 401 after refresh (storm-protected)
+        if (
+          res.status === 401 &&
+          p.startsWith("/mobile/") &&
+          p !== "/mobile/auth/refresh" &&
+          !alreadyRetried
+        ) {
+          const ok = await refreshSessionOnce().catch(() => false);
+
+          if (ok) {
+            // Rebuild headers so Authorization uses the NEW access token
+            // IMPORTANT: strip stale Authorization from cfg.headers first.
+            const base = { ...(cfg.headers as any) };
+            delete base.Authorization;
+            delete base.authorization;
+
+            const freshHeaders = buildHeaders(base, deviceId, Boolean(hasBody));
+
+            const freshAccess = await getAccessToken();
+            if (freshAccess) {
+              freshHeaders["Authorization"] = `Bearer ${freshAccess}`;
+
+              // Retry once, marked
+              const { _snapiRetried, ...rest } = cfg as any;
+              return apiFetch(p, {
+                ...rest,
+                _snapiRetried: true,
+                headers: freshHeaders,
+              } as any);
+            } else {
+              if (!quiet) console.warn("[apiFetch] refresh ok but no access token; not retrying", { path: p });
+              // Fall through to error below
+            }
+          }
+        }
+
+        if (!quiet && typeof data === "string" && data) {
+          console.log("[api] error body =", safePreview(data));
+        }
+
+        const message =
+          (data &&
+            typeof data === "object" &&
+            (((data as any).error as any) || ((data as any).message as any))) ||
+          `Request failed (${res.status})`;
+
+        throw makeError(message, {
+          status: res.status,
+          body: data,
+          code: (data && typeof data === "object" && (data as any).code) || undefined,
+          url,
+          path: p,
+          baseUrl: BASE_URL,
+        });
+      }
+
+      return data;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  // Build initial headers
+  const headers = buildHeaders(cfg.headers, deviceId, Boolean(hasBody));
 
   // ✅ Attach Bearer token for /mobile/* and /app/api/*
-  if (path.startsWith("/mobile/") || path.startsWith("/app/api/")) {
+  if (p.startsWith("/mobile/") || p.startsWith("/app/api/")) {
     const access = await getAccessToken();
     if (access) headers["Authorization"] = `Bearer ${access}`;
   }
-
-  const timeoutMs = Number(cfg.timeoutMs ?? 12000);
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  const quiet = Boolean(cfg.quiet);
-
-  const doFetch = async (hdrs: Record<string, string>) => {
-    if (!quiet) {
-      console.log("[api] ->", method, url, "| keyLen=", APP_KEY.length, "| device=", deviceId);
-    }
-
-    const res = await fetch(url, {
-      ...cfg,
-      method,
-      headers: hdrs,
-      signal: controller.signal,
-    });
-
-    if (!quiet) console.log("[api] <-", res.status, res.ok ? "OK" : "ERR", url);
-
-    const data = await readBodySafely(res);
-
-    if (!res.ok) {
-      if (!quiet && typeof data === "string" && data) {
-        console.log("[api] error body =", safePreview(data));
-      }
-
-      const message =
-        (data && typeof data === "object" && (((data as any).error as any) || ((data as any).message as any))) ||
-        `Request failed (${res.status})`;
-
-      throw makeError(message, {
-        status: res.status,
-        body: data,
-        code: (data && typeof data === "object" && (data as any).code) || undefined,
-        url,
-        path,
-        baseUrl: BASE_URL,
-      });
-    }
-
-    return data;
-  };
 
   try {
     // ------------------------------
     // SNAPI: prevent double-fire for block/unblock
     // ------------------------------
-    const isBlock = path === "/app/api/block" && method === "POST";
+    const isBlock = p === "/app/api/block" && method === "POST";
     if (isBlock) {
       const bodyObj = parseJsonBody(cfg.body);
       const from = clean(bodyObj?.from);
@@ -450,9 +584,9 @@ export async function apiFetch(path: string, init: ApiFetchInit = {}) {
           return await existing;
         }
 
-        const promise = (async () => {
+        const promise: Promise<ApiFetchResult> = (async () => {
           try {
-            return await doFetch(headers);
+            return await doFetchAttempt(headers);
           } finally {
             _blockInflight.delete(inflightKey);
           }
@@ -464,42 +598,32 @@ export async function apiFetch(path: string, init: ApiFetchInit = {}) {
     }
 
     // ------------------------------
-    // Normal requests (+ /mobile/* refresh retry on 401)
+    // Normal requests (401 retry handled inside doFetchAttempt)
     // ------------------------------
-    try {
-      return await doFetch(headers);
-    } catch (e: any) {
-      // If /mobile/* or /app/api/* is unauthorized, refresh once then retry once
-      if ((path.startsWith("/mobile/") || path.startsWith("/app/api/")) && e?.status === 401) {
-        const ok = await refreshSession();
-        if (ok) {
-          const access2 = await getAccessToken();
-          const headers2: Record<string, string> = { ...headers };
-          if (access2) headers2["Authorization"] = `Bearer ${access2}`;
-          return await doFetch(headers2);
-        }
-      }
-      throw e;
-    }
+    return await doFetchAttempt(headers);
   } catch (e: any) {
     // ✅ If it's already our rich HTTP error (non-2xx), keep it (don’t mask as network error)
     if (e && typeof e.status === "number") throw e;
     if (e && e.code === "MISSING_APP_KEY") throw e;
 
+    const msg = clean(e?.message).toLowerCase();
     const aborted =
       e?.name === "AbortError" ||
-      clean(e?.message).toLowerCase().includes("aborted") ||
-      clean(e?.message).toLowerCase().includes("timeout");
+      msg.includes("aborted") ||
+      msg.includes("timeout");
 
-    throw makeError(aborted ? "Server not reachable. Please try again." : "Network error. Check connectivity and try again.", {
-      cause: e,
-      code: aborted ? "TIMEOUT" : "NETWORK_ERROR",
-      url,
-      path,
-      baseUrl: BASE_URL,
-    });
-  } finally {
-    clearTimeout(timer);
+    throw makeError(
+      aborted
+        ? "Server not reachable. Please try again."
+        : "Network error. Check connectivity and try again.",
+      {
+        cause: e,
+        code: aborted ? "TIMEOUT" : "NETWORK_ERROR",
+        url,
+        path: p,
+        baseUrl: BASE_URL,
+      }
+    );
   }
 }
 

@@ -243,24 +243,34 @@ export default function HomeScreen({ navigation }: any) {
     try {
       setRefreshing(true);
 
-      const [mobileRes, recentRes] = await Promise.allSettled([
-        apiFetch("/mobile/refresh", { method: "GET" }),
-        apiFetch("/mobile/recent", { method: "GET" })
+      const [protRes, rulesRes, recentRes] = await Promise.allSettled([
+        apiFetch("/mobile/protection", { method: "GET" }),
+        apiFetch("/mobile/rules", { method: "GET" }),
+        apiFetch("/mobile/recent", { method: "GET" }),
       ]);
 
-      if (mobileRes.status === "fulfilled") {
-        const rMobile = mobileRes.value;
-        setEnabled(Boolean(rMobile?.enabled ?? rMobile?.protectionEnabled ?? true));
-        setSpamOn(Boolean(rMobile?.spamOn ?? rMobile?.spam ?? true));
-        setUnknownOn(Boolean(rMobile?.unknownOn ?? rMobile?.unknown ?? true));
-        setVoicemailOn(Boolean(rMobile?.voicemailOn ?? rMobile?.voicemail ?? true));
+      // ---- protection ----
+      if (protRes.status === "fulfilled") {
+        const r = protRes.value;
+        setEnabled(Boolean(r?.enabled ?? r?.protectionEnabled ?? true));
       }
 
-      const rRecent = recentRes.status === "fulfilled" ? recentRes.value : [];
+      // ---- rules ----
+      if (rulesRes.status === "fulfilled") {
+        const r = rulesRes.value;
+        setSpamOn(Boolean(r?.spamOn ?? r?.spam ?? true));
+        setUnknownOn(Boolean(r?.unknownOn ?? r?.unknown ?? true));
+        setVoicemailOn(Boolean(r?.voicemailOn ?? r?.voicemail ?? true));
+      }
+
+      // ---- recent ----
+      const rRecent =
+        recentRes.status === "fulfilled" ? recentRes.value : { items: [] as any[] };
+
       const items: RecentItem[] = Array.isArray(rRecent)
-        ? rRecent
+        ? (rRecent as any)
         : Array.isArray((rRecent as any)?.items)
-        ? (rRecent as any).items
+        ? ((rRecent as any).items as any)
         : [];
 
       const unique = dedupeRecent(items);
@@ -275,31 +285,48 @@ export default function HomeScreen({ navigation }: any) {
   const onToggleEnabled = useCallback(async () => {
     const next = !enabled;
     setEnabled(next);
+
     try {
       await apiFetch("/mobile/protection", {
         method: "POST",
         body: JSON.stringify({ enabled: next }),
         headers: { "Content-Type": "application/json" },
       });
-    } catch {
+    } catch (err) {
+      // rollback UI
       setEnabled(!next);
-      Alert.alert("Could not update", "Try again.");
+
+      const message = err instanceof Error ? err.message : "Try again.";
+      Alert.alert("Could not update", message);
     }
   }, [enabled]);
 
   const setRule = useCallback(
     async (key: "spam" | "unknown" | "voicemail", value: boolean) => {
+      // Optimistic UI update + rollback on failure
+      const prev = key === "spam" ? spamOn : key === "unknown" ? unknownOn : voicemailOn;
+
+      if (key === "spam") setSpamOn(value);
+      if (key === "unknown") setUnknownOn(value);
+      if (key === "voicemail") setVoicemailOn(value);
+
       try {
         await apiFetch("/mobile/rules", {
           method: "POST",
           body: JSON.stringify({ [key]: value }),
           headers: { "Content-Type": "application/json" },
         });
-      } catch {
-        Alert.alert("Could not update", "Try again.");
+      } catch (err) {
+        // rollback
+        if (key === "spam") setSpamOn(prev);
+        if (key === "unknown") setUnknownOn(prev);
+        if (key === "voicemail") setVoicemailOn(prev);
+
+        const message = err instanceof Error ? err.message : "Try again.";
+        Alert.alert("Could not update", message);
       }
     },
-    []
+    [spamOn, unknownOn, voicemailOn]
   );
 
   const toggleSpam = useCallback(() => {

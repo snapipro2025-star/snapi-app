@@ -5,7 +5,7 @@ import { View, StyleSheet, Animated, AccessibilityInfo, Easing } from "react-nat
 import GlassBackground from "../components/GlassBackground";
 
 // ✅ Real imports (no `as any`)
-import { getAccessToken, refreshSession } from "../api/client";
+import { getAccessToken, refreshSessionOnce } from "../api/client";
 import { getSetupComplete } from "../lib/setup";
 
 type Props = {
@@ -74,7 +74,7 @@ export default function SplashScreen({ onFinish }: Props) {
 
         // B) If no access, try refresh
         if (!authed) {
-          const ok = await refreshSession().catch(() => false);
+          const ok = await refreshSessionOnce().catch(() => false);
           authed = !!ok;
         }
 
