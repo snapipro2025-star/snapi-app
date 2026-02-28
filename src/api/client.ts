@@ -392,7 +392,10 @@ async function readBodySafely(res: Response) {
 // De-dupe / debounce for /app/api/block
 // ------------------------------
 const _blockInflight = new Map<string, Promise<any>>();
-const _blockLastAt = new Map<string, number>();
+const _blockLastAt = new Map<
+  string,
+  { ts: number; blocked: boolean }
+>();
 
 function parseJsonBody(body: any) {
   if (!body) return null;
@@ -555,6 +558,9 @@ export async function apiFetch(
   try {
     // ------------------------------
     // SNAPI: prevent double-fire for block/unblock
+    //  - Debounce only SAME state (block->block or unblock->unblock)
+    //  - Allow fast opposite toggles (block->unblock)
+    //  - Inflight de-dupe joins identical payloads
     // ------------------------------
     const isBlock = p === "/app/api/block" && method === "POST";
     if (isBlock) {
@@ -566,15 +572,21 @@ export async function apiFetch(
 
       if (from) {
         const now = Date.now();
-        const last = _blockLastAt.get(from) || 0;
+        const lastEntry = _blockLastAt.get(from); // { ts, blocked } | undefined
 
-        // 800ms debounce per number: ignore rapid second toggle
-        if (now - last < 800) {
-          console.log("[api][block] debounced", { from, blocked, ms: now - last });
+        // 800ms debounce per number, BUT only if it's the SAME state
+        // (prevents accidental double-tap, while allowing block->unblock quickly)
+        if (lastEntry && now - lastEntry.ts < 800 && lastEntry.blocked === blocked) {
+          console.log("[api][block] debounced (same state)", {
+            from,
+            blocked,
+            ms: now - lastEntry.ts,
+          });
           return { ok: true, debounced: true, from, blocked };
         }
 
-        _blockLastAt.set(from, now);
+        // record latest action (state-aware)
+        _blockLastAt.set(from, { ts: now, blocked });
 
         // Inflight de-dupe for identical payloads
         const inflightKey = `POST:${from}:${blocked}`;
@@ -584,7 +596,7 @@ export async function apiFetch(
           return await existing;
         }
 
-        const promise: Promise<ApiFetchResult> = (async () => {
+        const promise: Promise<ApiFetchResult> = (async (): Promise<ApiFetchResult> => {
           try {
             return await doFetchAttempt(headers);
           } finally {

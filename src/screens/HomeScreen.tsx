@@ -80,6 +80,32 @@ function statusDotEmoji(it: RecentItem) {
   return allowlisted ? "🟢" : "🟡";
 }
 
+/**
+ * Block / Unblock a caller number (mobile test)
+ * Uses the same backend behavior as web admin (recommended).
+ *
+ * If this endpoint differs in your server, we’ll swap it to match.
+ */
+async function setBlockedApi(fromE164: string, blocked: boolean) {
+  const from = String(fromE164 || "").trim();
+  if (!from) throw new Error("Missing from number");
+
+  return apiFetch("/app/api/block", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ from, blocked }),
+  });
+}
+
+function formEncode(obj: Record<string, any>) {
+  const p = new URLSearchParams();
+  Object.entries(obj).forEach(([k, v]) => {
+    if (v === undefined || v === null) return;
+    p.append(k, String(v));
+  });
+  return p.toString();
+}
+
 // Kept for later Phase C/UX tuning; not used for dot in Phase B
 function riskDotColor(risk: number | string) {
   const n = typeof risk === "number" ? risk : Number(risk);
@@ -196,6 +222,9 @@ export default function HomeScreen({ navigation }: any) {
   const [voicemailOn, setVoicemailOn] = useState(true);
 
   const [recent, setRecent] = useState<RecentItem[]>([]);
+
+  const [savingByKey, setSavingByKey] = useState<Record<string, boolean>>({});
+  const inFlightRef = useRef<Record<string, boolean>>({});
 
   // Auto-sync contacts allowlist (at most once per app session + once per 24h inside lib)
   const didKickAllowlistSync = useRef(false);
@@ -373,6 +402,59 @@ export default function HomeScreen({ navigation }: any) {
     };
   }, [loadRefresh]);
 
+  const toggleBlockFromRecent = useCallback(
+    async (it: RecentItem, idx: number) => {
+      const from = String(it?.from || "").trim();
+      if (!from || it?.privateNumber) {
+        Alert.alert("Not available", "Private/hidden numbers can’t be blocked/unblocked.");
+        return;
+      }
+
+      const key = itemKey(it, idx);
+      if (inFlightRef.current[key]) return;
+      inFlightRef.current[key] = true;
+
+      const next = !Boolean(it?.blocked);
+
+      // optimistic UI
+      setRecent((prev) =>
+        prev.map((x, i) => (itemKey(x, i) === key ? { ...x, blocked: next } : x))
+      );
+
+      setSavingByKey((m) => ({ ...m, [key]: true }));
+      try {
+        await apiFetch("/app/api/block", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+          body: formEncode({ from, blocked: next }),
+        });
+
+        // re-sync (same shape you already use)
+        const rRecent = await apiFetch("/mobile/recent", { method: "GET" });
+        const items: RecentItem[] = Array.isArray(rRecent)
+          ? (rRecent as any)
+          : Array.isArray((rRecent as any)?.items)
+            ? ((rRecent as any).items as any)
+            : [];
+
+        const unique = dedupeRecent(items);
+        setRecent(unique.slice(0, 25));
+      } catch (e: any) {
+        // rollback
+        setRecent((prev) =>
+          prev.map((x, i) => (itemKey(x, i) === key ? { ...x, blocked: !next } : x))
+        );
+        Alert.alert("Update failed", String(e?.message || e));
+      } finally {
+        setSavingByKey((m) => ({ ...m, [key]: false }));
+        setTimeout(() => {
+          inFlightRef.current[key] = false;
+        }, 650);
+      }
+    },
+    [setRecent]
+  );
+
   return (
     <GlassBackground>
       <View
@@ -502,17 +584,40 @@ export default function HomeScreen({ navigation }: any) {
                             </View>
                           </View>
 
-                          <Pressable
-                            style={[styles.viewBtn, styles.viewBtnRaised]}
-                            onPress={() =>
-                              navigation?.navigate?.("CallDetails", {
-                                item: it,
-                                callSid,
-                              })
-                            }
-                          >
-                            <Text style={styles.viewBtnText}>View</Text>
-                          </Pressable>
+                          {/* Actions (Block + View) */}
+                          <View style={{ flexDirection: "row", alignItems: "center" }}>
+                            <Pressable
+                              onPress={() => toggleBlockFromRecent(it, idx)}
+                              disabled={!!savingByKey[itemKey(it, idx)]}
+                              style={[
+                                styles.viewBtn,
+                                styles.viewBtnRaised,
+                                { marginRight: 10 },
+                                it?.blocked ? { opacity: 0.9 } : null,
+                                !!savingByKey[itemKey(it, idx)] ? { opacity: 0.5 } : null,
+                              ]}
+                            >
+                              <Text style={styles.viewBtnText}>
+                                {!!savingByKey[itemKey(it, idx)]
+                                  ? "…"
+                                  : it?.blocked
+                                    ? "Unblock"
+                                    : "Block"}
+                              </Text>
+                            </Pressable>
+
+                            <Pressable
+                              style={[styles.viewBtn, styles.viewBtnRaised]}
+                              onPress={() =>
+                                navigation?.navigate?.("CallDetails", {
+                                  item: it,
+                                  callSid,
+                                })
+                              }
+                            >
+                              <Text style={styles.viewBtnText}>View</Text>
+                            </Pressable>
+                          </View>
                         </View>
                       </View>
                     );
