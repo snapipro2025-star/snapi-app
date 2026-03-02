@@ -37,7 +37,7 @@ function prettyJson(obj: any) {
 }
 
 const SUPPORT_EMAIL = "support@snapipro.com";
-const YOUTUBE_SETUP_URL = "https://youtu.be/5YJ9ae9kr1s";
+const YOUTUBE_SETUP_URL = "https://youtube.com/shorts/BwVbAE9wTaw?feature=share";
 
 // ✅ Must match TWILIO_CALLER_ID (what you want users to save as "SNAPI Intercept")
 const SNAPI_INTERCEPT_NUMBER = "+17204576848";

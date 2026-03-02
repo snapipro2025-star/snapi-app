@@ -158,6 +158,25 @@ export async function hydrateSession(): Promise<SessionState> {
   }
 }
 
+function getJwtExp(token: string): number | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length < 2) return null;
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return typeof payload?.exp === "number" ? payload.exp : null;
+  } catch {
+    return null;
+  }
+}
+
+function isJwtExpired(token: string | null | undefined, skewSec = 30): boolean {
+  if (!token) return true;
+  const exp = getJwtExp(token);
+  if (!exp) return false; // if we can't decode, don't block
+  const now = Math.floor(Date.now() / 1000);
+  return exp <= now + skewSec;
+}
+
 export async function setTokens(accessToken: string, refreshToken: string) {
   const a = String(accessToken || "");
   const r = String(refreshToken || "");
@@ -196,8 +215,9 @@ export async function refreshSessionOnce(): Promise<boolean> {
   if (_refreshInflight) return _refreshInflight;
 
   if (now - _refreshLastAt < REFRESH_DEBOUNCE_MS) {
-    // "recently attempted" — don't claim success
-    return false;
+    // Only treat as OK if the *current* stored access token is not expired
+    const current = await getAccessToken().catch(() => "");
+    return !isJwtExpired(current);
   }
 
   _refreshLastAt = now;
@@ -285,6 +305,8 @@ export async function refreshSession(): Promise<boolean> {
       console.log("[refreshSession] missing accessToken in response");
       return false;
     }
+
+    console.log("[refreshSession] access exp", getJwtExp(accessToken), "now", Math.floor(Date.now() / 1000));
 
     const finalRefresh = newRefreshToken || refresh;
 
