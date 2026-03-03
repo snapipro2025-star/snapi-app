@@ -9,7 +9,8 @@
       "distribution": "internal",
       "android": {
         "credentialsSource": "remote"
-      }
+      },
+      "channel": "development"
     },
     "preview": {
       "distribution": "internal",
@@ -17,7 +18,8 @@
       "android": {
         "buildType": "apk",
         "credentialsSource": "remote"
-      }
+      },
+      "channel": "preview"
     },
     "production": {
       "distribution": "store",
@@ -25,7 +27,8 @@
       "android": {
         "buildType": "app-bundle",
         "credentialsSource": "remote"
-      }
+      },
+      "channel": "production"
     }
   },
   "submit": {

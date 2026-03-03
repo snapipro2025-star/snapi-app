@@ -37,7 +37,8 @@ function prettyJson(obj: any) {
 }
 
 const SUPPORT_EMAIL = "support@snapipro.com";
-const YOUTUBE_SETUP_URL = "https://youtube.com/shorts/BwVbAE9wTaw?https://youtube.com/shorts/BwVbAE9wTawfeature=share";
+const YOUTUBE_SETUP_URL =
+  "https://youtube.com/shorts/Z0dYrHMFI2Q";
 
 // ✅ Must match TWILIO_CALLER_ID (what you want users to save as "SNAPI Intercept")
 const SNAPI_INTERCEPT_NUMBER = "+17204576848";
@@ -111,20 +112,20 @@ export default function SetupHelpScreen({ navigation }: Props) {
     else navigation?.navigate?.("Home");
   }, [navigation]);
 
+  const YOUTUBE_SETUP_URL =
+  "https://youtube.com/shorts/Z0dYrHMFI2Q";
   const openSetupVideo = useCallback(() => {
-    Linking.openURL(YOUTUBE_SETUP_URL).catch(() => {
+    const url = String(YOUTUBE_SETUP_URL || "").trim();
+
+    if (!url || !/^https?:\/\//i.test(url)) {
+      Alert.alert("Bad link", "Video link is missing or invalid.");
+      return;
+    }
+
+    Linking.openURL(url).catch(() => {
       Alert.alert("Couldn’t open link", "Please try again or copy the link from support.");
     });
-  }, []);
-
-  const copyText = useCallback(async (label: string, text: string) => {
-    try {
-      await Clipboard.setStringAsync(text);
-      Alert.alert("Copied", `${label}\n\n${text}`);
-    } catch {
-      Alert.alert("Copy failed", "Couldn’t copy on this device.");
-    }
-  }, []);
+  }, [YOUTUBE_SETUP_URL]);
 
   // ✅ Load one-time acknowledgement flag
   useEffect(() => {

@@ -3,52 +3,50 @@
     "name": "SNAPI",
     "slug": "snapi-app",
     "version": "1.0.0",
-
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "newArchEnabled": false,
-
     "icon": "./assets/icon.png",
-
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#050816"
     },
-
     "updates": {
-      "enabled": false
+      "enabled": false,
+      "url": "https://u.expo.dev/c572a37d-60d8-4bd9-ae9f-c769d7b81f7e"
     },
-
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "runtimeVersion": {
+        "policy": "appVersion"
+      }
     },
-
     "android": {
       "package": "com.snapi.app",
-      "permissions": ["POST_NOTIFICATIONS"],
-
+      "permissions": [
+        "POST_NOTIFICATIONS",
+        "POST_NOTIFICATIONS"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#050816"
       },
-
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "runtimeVersion": "1.0.0"
     },
-
     "web": {
       "favicon": "./assets/favicon.png"
     },
-
-    "plugins": ["expo-secure-store"],
-
+    "plugins": [
+      "expo-secure-store"
+    ],
     "extra": {
       "eas": {
         "projectId": "c572a37d-60d8-4bd9-ae9f-c769d7b81f7e"
       }
     },
-
     "owner": "snapi"
   }
 }
