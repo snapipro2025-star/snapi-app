@@ -557,35 +557,37 @@ export default function CallDetailsScreen({ route, navigation }: any) {
           </View>
 
         {/* Audio Actions */}
-          <View style={[styles.actionsRow, { gap: 10, justifyContent: "space-between" }]}>
+        <View style={[styles.actionsCol, { gap: 10 }]}>
+          <Pressable
+            onPress={onOpenVoicemail}
+            disabled={!voicemailUrl || openingVoicemail}
+            style={({ pressed }) => [
+              styles.actionPill,
+              styles.actionPillFull,
+              !voicemailUrl || openingVoicemail ? styles.actionPillDisabled : null,
+              pressed && voicemailUrl && !openingVoicemail ? styles.actionPillPressed : null,
+            ]}
+          >
+            <Text style={styles.actionPillText}>
+              {voicemailUrl ? "Play Voicemail" : "Voicemail N/A"}
+            </Text>
+          </Pressable>
+
+          {hasWhisper ? (
             <Pressable
-              onPress={onOpenVoicemail}
-              disabled={!voicemailUrl || openingVoicemail}
+              onPress={onOpenWhisper}
               style={({ pressed }) => [
                 styles.actionPill,
-                !voicemailUrl || openingVoicemail ? styles.actionPillDisabled : null,
-                pressed && voicemailUrl && !openingVoicemail ? styles.actionPillPressed : null,
+                styles.actionPillFull,
+                pressed ? styles.actionPillPressed : null,
               ]}
             >
-              <Text style={styles.actionPillText} numberOfLines={1}>
-                {voicemailUrl ? "Play Voicemail" : "Voicemail N/A"}
+              <Text style={styles.actionPillText}>
+                Play Caller Announcement
               </Text>
             </Pressable>
-
-            {hasWhisper ? (
-              <Pressable
-                onPress={onOpenWhisper}
-                style={({ pressed }) => [
-                  styles.actionPill,
-                  pressed ? styles.actionPillPressed : null,
-                ]}
-              >
-                <Text style={styles.actionPillText} numberOfLines={1}>
-                  Play Caller Announcement
-                </Text>
-              </Pressable>
-            ) : null}
-          </View>
+          ) : null}
+        </View>
 
           {/* Primary Actions */}
           <View style={[styles.actionsCol, { marginTop: 10 }]}>
