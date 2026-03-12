@@ -367,16 +367,17 @@ export default function CallDetailsScreen({ route, navigation }: any) {
     }
   }, [from, canActOnNumber]);
 
-  const onOpenVoicemail = useCallback(async () => {
+    const onOpenVoicemail = useCallback(async () => {
     if (openingVoicemail) return;
 
     const sid = String(
       (item as any)?.voicemailRecordingSid || (item as any)?.recordingSid || ""
     ).trim();
 
-    const url = sid
+    const directUrl = String(voicemailUrl || "").trim();
+    const url = directUrl || (sid
       ? `${BASE_URL}/app/api/voicemail/${encodeURIComponent(sid)}`
-      : String(voicemailUrl || "").trim();
+      : "");
 
     if (!url) return;
 
