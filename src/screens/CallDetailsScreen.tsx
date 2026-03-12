@@ -376,11 +376,17 @@ export default function CallDetailsScreen({ route, navigation }: any) {
 
     const directUrl = String(voicemailUrl || "").trim();
     const isRawTwilioUrl = /^https:\/\/api\.twilio\.com\//i.test(directUrl);
+    const isSignedSnapiVoicemailUrl =
+      /^https:\/\/api\.snapipro\.com\/app\/api\/voicemail\//i.test(directUrl) ||
+      /^\/app\/api\/voicemail\//i.test(directUrl);
 
-    const safeDirectUrl = directUrl && !isRawTwilioUrl ? directUrl : "";
-    const url = safeDirectUrl || (sid
+    // Prefer sid-based fresh playback URL over any stored signed voicemail URL
+    const safeDirectUrl =
+      directUrl && !isRawTwilioUrl && !isSignedSnapiVoicemailUrl ? directUrl : "";
+
+    const url = sid
       ? `${BASE_URL}/app/api/voicemail/${encodeURIComponent(sid)}`
-      : "");
+      : safeDirectUrl;
 
     if (!url) return;
 
