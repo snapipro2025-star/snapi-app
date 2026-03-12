@@ -380,13 +380,24 @@ export default function CallDetailsScreen({ route, navigation }: any) {
       /^https:\/\/api\.snapipro\.com\/app\/api\/voicemail\//i.test(directUrl) ||
       /^\/app\/api\/voicemail\//i.test(directUrl);
 
-    // Prefer sid-based fresh playback URL over any stored signed voicemail URL
+    // Only use direct URLs if they are not raw Twilio and not old signed voicemail links.
     const safeDirectUrl =
       directUrl && !isRawTwilioUrl && !isSignedSnapiVoicemailUrl ? directUrl : "";
 
-    const url = sid
-      ? `${BASE_URL}/app/api/voicemail/${encodeURIComponent(sid)}`
-      : safeDirectUrl;
+    let url = safeDirectUrl;
+
+    if (sid) {
+      try {
+        const r = await apiFetch(`/app/api/audio-open-url/${encodeURIComponent(sid)}`, {
+          method: "GET",
+        });
+
+        if (r?.ok && r?.url) {
+          const u = String(r.url || "").trim();
+          url = u.startsWith("http") ? u : `${BASE_URL}${u}`;
+        }
+      } catch {}
+    }
 
     if (!url) return;
 
