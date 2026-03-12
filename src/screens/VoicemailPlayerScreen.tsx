@@ -60,6 +60,13 @@ export default function VoicemailPlayerScreen({ route, navigation }: Props) {
   const hasRecordingSid = Boolean(recordingSid && recordingSid.startsWith("RE"));
   const hasAnySource = Boolean(hasRecordingSid || fallbackUrl);
 
+  console.log("[VoicemailPlayer] params", {
+    rawUrl,
+    fallbackUrl,
+    recordingSid,
+    hasRecordingSid,
+  });
+
   const soundRef = useRef<Audio.Sound | null>(null);
   const cacheUriRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
@@ -163,10 +170,15 @@ export default function VoicemailPlayerScreen({ route, navigation }: Props) {
   /**
    * Resolve a player-friendly URL:
    * - Preferred: mint short-lived open URL from server using recordingSid (RE...)
-   * - Fallback: use raw/twilio url only if recordingSid missing
-   */
-    const resolvePlaybackUrl = useCallback(async (): Promise<string> => {
+   * - Fallback: use raw/twilio url only if recordingSid missing*/
+  const resolvePlaybackUrl = useCallback(async (): Promise<string> => {
     setPhase("resolving");
+
+    console.log("[VoicemailPlayer] resolvePlaybackUrl", {
+      fallbackUrl,
+      recordingSid,
+      hasRecordingSid,
+    });
 
     // Prefer explicit URL already passed from the app flow
     if (fallbackUrl) {
@@ -253,6 +265,12 @@ export default function VoicemailPlayerScreen({ route, navigation }: Props) {
           }
         } catch {}
 
+        console.log("[VoicemailPlayer] invalid download", {
+          url,
+          size,
+          head,
+        });
+
         throw new Error(
           `Downloaded file is not valid audio (size=${size}).` + (head ? ` Head: ${head}` : "")
         );
@@ -300,6 +318,7 @@ export default function VoicemailPlayerScreen({ route, navigation }: Props) {
       await cleanupCacheFile();
 
       const url = await resolvePlaybackUrl();
+      console.log("[VoicemailPlayer] resolved url", url);
       if (!mountedRef.current) return;
 
       // ✅ Always download then play local (prevents garbled streaming)
