@@ -375,7 +375,10 @@ export default function CallDetailsScreen({ route, navigation }: any) {
     ).trim();
 
     const directUrl = String(voicemailUrl || "").trim();
-    const url = directUrl || (sid
+    const isRawTwilioUrl = /^https:\/\/api\.twilio\.com\//i.test(directUrl);
+
+    const safeDirectUrl = directUrl && !isRawTwilioUrl ? directUrl : "";
+    const url = safeDirectUrl || (sid
       ? `${BASE_URL}/app/api/voicemail/${encodeURIComponent(sid)}`
       : "");
 

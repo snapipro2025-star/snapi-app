@@ -107,7 +107,7 @@ function screenedStatusLine(it: RecentItem) {
   }
 
   if (allowlisted) return "Allowed";
-  return "Screened";
+  return "Screened — Missed";
 }
 
 function whisperLine(it: RecentItem) {
@@ -791,9 +791,9 @@ const styles = StyleSheet.create({
     padding: 12,
   },
 
-    rowMiddleLine: {
+  rowMiddleLine: {
     fontSize: 13,
-    opacity: 0.9,
+    color: "rgba(226, 232, 240, 0.92)",
     marginTop: 2,
   },
 

@@ -36,9 +36,18 @@ function prettyJson(obj: any) {
   }
 }
 
+async function copyText(label: string, value: string) {
+  const v = String(value || "").trim();
+  if (!v) {
+    Alert.alert("Nothing to copy", `${label} is empty.`);
+    return;
+  }
+  await Clipboard.setStringAsync(v);
+  Alert.alert("Copied", `${label} copied to clipboard.`);
+}
+
 const SUPPORT_EMAIL = "support@snapipro.com";
-const YOUTUBE_SETUP_URL =
-  "https://youtube.com/shorts/Z0dYrHMFI2Q";
+const SETUP_VIDEO_URL = "https://snapipro.com/setup.html";
 
 // ✅ Must match TWILIO_CALLER_ID (what you want users to save as "SNAPI Intercept")
 const SNAPI_INTERCEPT_NUMBER = "+17204576848";
@@ -112,31 +121,10 @@ export default function SetupHelpScreen({ navigation }: Props) {
     else navigation?.navigate?.("Home");
   }, [navigation]);
 
-  const YOUTUBE_SETUP_URL =
-  "https://youtube.com/shorts/Z0dYrHMFI2Q";
   const openSetupVideo = useCallback(() => {
-    const url = String(YOUTUBE_SETUP_URL || "").trim();
-
-    if (!url || !/^https?:\/\//i.test(url)) {
-      Alert.alert("Bad link", "Video link is missing or invalid.");
-      return;
-    }
-
-    Linking.openURL(url).catch(() => {
-      Alert.alert("Couldn’t open link", "Please try again or copy the link from support.");
+    Linking.openURL(SETUP_VIDEO_URL).catch(() => {
+      Alert.alert("Couldn’t open link", "Please try again.");
     });
-  }, [YOUTUBE_SETUP_URL]);
-
-  // ✅ Load one-time acknowledgement flag
-  useEffect(() => {
-    (async () => {
-      try {
-        const v = await AsyncStorage.getItem(KEY_INTERCEPT_ACK);
-        setShowInterceptCard(v !== "1"); // show until acknowledged
-      } catch {
-        setShowInterceptCard(true);
-      }
-    })();
   }, []);
 
   // ✅ Mark acknowledged (one-time)
