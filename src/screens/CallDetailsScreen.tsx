@@ -557,13 +557,12 @@ export default function CallDetailsScreen({ route, navigation }: any) {
           </View>
 
         {/* Audio Actions */}
-          <View style={styles.actionsRow}>
+          <View style={[styles.actionsRow, { gap: 10, justifyContent: "space-between" }]}>
             <Pressable
               onPress={onOpenVoicemail}
               disabled={!voicemailUrl || openingVoicemail}
               style={({ pressed }) => [
                 styles.actionPill,
-                styles.actionPillWide,
                 !voicemailUrl || openingVoicemail ? styles.actionPillDisabled : null,
                 pressed && voicemailUrl && !openingVoicemail ? styles.actionPillPressed : null,
               ]}
@@ -578,7 +577,6 @@ export default function CallDetailsScreen({ route, navigation }: any) {
                 onPress={onOpenWhisper}
                 style={({ pressed }) => [
                   styles.actionPill,
-                  styles.actionPillWide,
                   pressed ? styles.actionPillPressed : null,
                 ]}
               >
