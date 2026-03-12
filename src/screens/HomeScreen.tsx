@@ -51,6 +51,10 @@ type RecentItem = {
 
   allowlisted?: boolean;
   allowed?: boolean;
+
+  hasWhisper?: boolean;
+  whisperRecordingSid?: string;
+  introRecordingSid?: string;
 };
 
 function clamp(n: number, a: number, b: number) {
@@ -78,6 +82,42 @@ function statusDotEmoji(it: RecentItem) {
     status.includes("allowed");
 
   return allowlisted ? "🟢" : "🟡";
+}
+
+function screenedStatusLine(it: RecentItem) {
+  const blocked = Boolean(it?.blocked);
+  if (blocked) return "Blocked";
+
+  const action = String((it as any)?.action || "").toLowerCase().trim();
+  const status = String((it as any)?.status || "").toLowerCase().trim();
+  const allowlisted =
+    Boolean((it as any)?.allowlisted) ||
+    Boolean((it as any)?.allowed) ||
+    action === "allow";
+
+  if (status.includes("voicemail")) return "Voicemail";
+  if (action === "voicemail") return "Voicemail";
+  if (action === "blocked") return "Blocked";
+
+  if (action === "forwarded") {
+    if (status.includes("completed") || status.includes("answered") || status === "in-progress") {
+      return `${allowlisted ? "Allowed" : "Screened"} — Answered`;
+    }
+    return `${allowlisted ? "Allowed" : "Screened"} — Missed`;
+  }
+
+  if (allowlisted) return "Allowed";
+  return "Screened";
+}
+
+function whisperLine(it: RecentItem) {
+  const hasWhisper = Boolean(
+    (it as any)?.hasWhisper ||
+      (it as any)?.whisperRecordingSid ||
+      (it as any)?.introRecordingSid
+  );
+
+  return hasWhisper ? "▶ Caller announced" : "";
 }
 
 // Kept for later Phase C/UX tuning; not used for dot in Phase B
@@ -180,7 +220,7 @@ function dedupeRecent(items: RecentItem[]) {
   return Array.from(byKey.values());
 }
 
-const YOUTUBE_START_HERE_URL = "https://youtu.be/5YJ9ae9kr1s";
+const START_HERE_URL = "https://snapipro.com/setup.html";
 
 export default function HomeScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
@@ -390,7 +430,7 @@ export default function HomeScreen({ navigation }: any) {
             <Text style={styles.heroTitle}>SNAPI Shield</Text>
 
             <Pressable
-              onPress={() => Linking.openURL(YOUTUBE_START_HERE_URL)}
+              onPress={() => Linking.openURL(START_HERE_URL)}
               style={styles.youtubeBtn}
               hitSlop={10}
             >
@@ -477,7 +517,8 @@ export default function HomeScreen({ navigation }: any) {
                 <View style={styles.list}>
                   {recent.map((it, idx) => {
                     const dot = statusDotEmoji(it);
-                    const top = callerIdLine(it);
+                    const top = screenedStatusLine(it);
+                    const middle = whisperLine(it);
                     const bottom = phoneLine(it);
                     const callSid = bestCallSid(it);
 
@@ -489,10 +530,16 @@ export default function HomeScreen({ navigation }: any) {
                               <Text style={styles.statusDot}>{dot}</Text>
                             </View>
 
-                            <View style={{ flex: 1, minWidth: 0 }}>
+                              <View style={{ flex: 1, minWidth: 0 }}>
                               <Text style={styles.rowTopLine} numberOfLines={1}>
                                 {top}
                               </Text>
+
+                              {middle ? (
+                                <Text style={styles.rowMiddleLine} numberOfLines={1}>
+                                  {middle}
+                                </Text>
+                              ) : null}
 
                               {bottom ? (
                                 <Text style={styles.rowBottomLine} numberOfLines={1}>
@@ -742,6 +789,12 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.10)",
     backgroundColor: "rgba(255,255,255,0.03)",
     padding: 12,
+  },
+
+    rowMiddleLine: {
+    fontSize: 13,
+    opacity: 0.9,
+    marginTop: 2,
   },
 
   rowTop: {
