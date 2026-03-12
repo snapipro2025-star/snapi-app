@@ -165,17 +165,21 @@ export default function VoicemailPlayerScreen({ route, navigation }: Props) {
    * - Preferred: mint short-lived open URL from server using recordingSid (RE...)
    * - Fallback: use raw/twilio url only if recordingSid missing
    */
-  const resolvePlaybackUrl = useCallback(async (): Promise<string> => {
+    const resolvePlaybackUrl = useCallback(async (): Promise<string> => {
     setPhase("resolving");
 
+    // Prefer explicit URL already passed from the app flow
+    if (fallbackUrl) {
+      return fallbackUrl.startsWith("http") ? fallbackUrl : `${BASE_URL}${fallbackUrl}`;
+    }
+
+    // Fallback: mint a short-lived URL from recordingSid
     if (hasRecordingSid) {
       const r = await apiFetch(`/app/api/audio-open-url/${encodeURIComponent(recordingSid)}`);
       if (!r?.ok || !r?.url) throw new Error(r?.error || "Failed to get voicemail link");
-      const u = String(r.url);
+      const u = String(r.url || "").trim();
       return u.startsWith("http") ? u : `${BASE_URL}${u}`;
     }
-
-    if (fallbackUrl) return fallbackUrl;
 
     throw new Error("No voicemail available.");
   }, [fallbackUrl, hasRecordingSid, recordingSid]);
@@ -373,8 +377,9 @@ export default function VoicemailPlayerScreen({ route, navigation }: Props) {
   }, [busy, hasAnySource, playing, ready]);
 
   const sourceText = useMemo(() => {
+    if (fallbackUrl) return fallbackUrl;
     if (hasRecordingSid) return `recordingSid: ${recordingSid}`;
-    return fallbackUrl ? `url: ${fallbackUrl}` : "(none)";
+    return "none";
   }, [fallbackUrl, hasRecordingSid, recordingSid]);
 
   const onPressInfo = useCallback(() => {
