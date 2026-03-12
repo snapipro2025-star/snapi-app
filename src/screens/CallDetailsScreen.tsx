@@ -367,12 +367,28 @@ export default function CallDetailsScreen({ route, navigation }: any) {
     }
   }, [from, canActOnNumber]);
 
-    const onOpenVoicemail = useCallback(async () => {
+  // --------------------------------------------------
+  // Audio sources
+  // --------------------------------------------------
+
+  const voicemailSid = String(
+    (item as any)?.voicemailRecordingSid || (item as any)?.recordingSid || ""
+  ).trim();
+
+  const whisperSid = String(
+    (item as any)?.whisperRecordingSid || (item as any)?.introRecordingSid || ""
+  ).trim();
+
+  const hasWhisper = Boolean(whisperSid);
+
+  // --------------------------------------------------
+  // Open voicemail
+  // --------------------------------------------------
+
+  const onOpenVoicemail = useCallback(async () => {
     if (openingVoicemail) return;
 
-    const sid = String(
-      (item as any)?.voicemailRecordingSid || (item as any)?.recordingSid || ""
-    ).trim();
+    const sid = voicemailSid;
 
     const directUrl = String(voicemailUrl || "").trim();
     const isRawTwilioUrl = /^https:\/\/api\.twilio\.com\//i.test(directUrl);
@@ -380,7 +396,7 @@ export default function CallDetailsScreen({ route, navigation }: any) {
       /^https:\/\/api\.snapipro\.com\/app\/api\/voicemail\//i.test(directUrl) ||
       /^\/app\/api\/voicemail\//i.test(directUrl);
 
-    // Only use direct URLs if they are not raw Twilio and not old signed voicemail links.
+    // Only use safe direct URLs
     const safeDirectUrl =
       directUrl && !isRawTwilioUrl && !isSignedSnapiVoicemailUrl ? directUrl : "";
 
@@ -403,7 +419,6 @@ export default function CallDetailsScreen({ route, navigation }: any) {
 
     setOpeningVoicemail(true);
 
-    // Prefer: in-app player
     try {
       navigation?.navigate?.("VoicemailPlayer", {
         url,
@@ -411,11 +426,10 @@ export default function CallDetailsScreen({ route, navigation }: any) {
         callSid,
         recordingSid: sid || undefined,
       });
+
       setTimeout(() => setOpeningVoicemail(false), 250);
       return;
-    } catch {
-      // fall through
-    }
+    } catch {}
 
     try {
       const ok = await safeCanOpen(url);
@@ -429,7 +443,37 @@ export default function CallDetailsScreen({ route, navigation }: any) {
     } finally {
       setOpeningVoicemail(false);
     }
-  }, [openingVoicemail, item, voicemailUrl, navigation, callSid]);
+  }, [openingVoicemail, voicemailSid, voicemailUrl, navigation, item, callSid]);
+
+    const onOpenWhisper = useCallback(async () => {
+    if (!whisperSid) return;
+
+    try {
+      const r = await apiFetch(`/app/api/audio-open-url/${encodeURIComponent(whisperSid)}`, {
+        method: "GET",
+      });
+
+      if (!r?.ok || !r?.url) {
+        Alert.alert("Could not open caller announcement", "Try again.");
+        return;
+      }
+
+      const u = String(r.url || "").trim();
+      const url = u.startsWith("http") ? u : `${BASE_URL}${u}`;
+
+      navigation?.navigate?.("VoicemailPlayer", {
+        url,
+        item: {
+          ...(item as any),
+          recordingSid: whisperSid,
+        },
+        callSid,
+        recordingSid: whisperSid,
+      });
+    } catch {
+      Alert.alert("Could not open caller announcement", "Try again.");
+    }
+  }, [whisperSid, navigation, item, callSid]);
 
   const onOpenCallId = useCallback(() => {
     if (!callSid) return;
@@ -512,7 +556,7 @@ export default function CallDetailsScreen({ route, navigation }: any) {
             <InfoIcon onPress={() => setShowActionsInfo(true)} />
           </View>
 
-          {/* Voicemail */}
+        {/* Audio Actions */}
           <View style={styles.actionsRow}>
             <Pressable
               onPress={onOpenVoicemail}
@@ -528,6 +572,21 @@ export default function CallDetailsScreen({ route, navigation }: any) {
                 {voicemailUrl ? "Play Voicemail" : "Voicemail N/A"}
               </Text>
             </Pressable>
+
+            {hasWhisper ? (
+              <Pressable
+                onPress={onOpenWhisper}
+                style={({ pressed }) => [
+                  styles.actionPill,
+                  styles.actionPillWide,
+                  pressed ? styles.actionPillPressed : null,
+                ]}
+              >
+                <Text style={styles.actionPillText} numberOfLines={1}>
+                  Play Caller Announcement
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
 
           {/* Primary Actions */}
