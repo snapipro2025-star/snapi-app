@@ -86,7 +86,6 @@ export default function SetupHelpScreen({ navigation }: Props) {
 
   const [busy, setBusy] = useState(false);
   const [diag, setDiag] = useState<Diag>({});
-  const [snapiNumber, setSnapiNumber] = useState<string | null>(null);
   const [snapiNumberError, setSnapiNumberError] = useState<string | null>(null);
 
   // --------------------------------------------------
@@ -96,12 +95,12 @@ export default function SetupHelpScreen({ navigation }: Props) {
   // --------------------------------------------------
   const contactName = "SNAPI Intercept";
   const contactNumber = useMemo(() => {
-    const n = String(snapiNumber || diag.snapiNumber || "").trim();
+    const n = String(diag.snapiNumber || "").trim();
     // Prefer 10-digit formatting for display/use
     const digits = n.replace(/[^\d]/g, "");
     const ten = digits.length >= 10 ? digits.slice(-10) : "";
     return ten ? `*71${ten}` : "";
-  }, [snapiNumber, diag.snapiNumber]);
+  }, [diag.snapiNumber]);
 
   const [savingContact, setSavingContact] = useState(false);
 
@@ -184,7 +183,6 @@ export default function SetupHelpScreen({ navigation }: Props) {
 
   const runDiagnostics = useCallback(async () => {
     setBusy(true);
-    setSnapiNumber(null);
     setSnapiNumberError(null);
 
     const base = clean(BASE_URL) || clean((globalThis as any)?.BASE_URL) || "";
@@ -239,10 +237,8 @@ export default function SetupHelpScreen({ navigation }: Props) {
       try {
         const data = await apiFetch("/app/api/snapi-number", { method: "GET" });
         const fetched = clean((data as any)?.snapiNumber) || "";
-        setSnapiNumber(fetched || null);
         next.snapiNumber = fetched;
       } catch {
-        setSnapiNumber(null);
         next.snapiNumber = "";
       }
 
@@ -386,7 +382,7 @@ export default function SetupHelpScreen({ navigation }: Props) {
               Save Contact → SNAPI Intercept
             </Text>
 
-            {!snapiNumber && !diag.snapiNumber ? (
+            {!diag.snapiNumber ? (
               <Text style={styles.warnText}>
                 SNAPI number not loaded yet. Run Diagnostics, then come back here.
               </Text>
@@ -456,7 +452,7 @@ export default function SetupHelpScreen({ navigation }: Props) {
                 build: diag.build,
                 ping: { ok: diag.pingOk, status: diag.pingStatus, echo: diag.pingEcho },
                 health: { ok: diag.healthOk, status: diag.healthStatus, echo: diag.healthEcho },
-                snapiNumber: snapiNumber || diag.snapiNumber || "",
+                snapiNumber: diag.snapiNumber || "",
                 ts: diag.ts,
                 error: diag.error || "",
               })}
