@@ -78,6 +78,7 @@ type Diag = {
 
   snapiNumber?: string;
   snapiNumberError?: string;
+  userId?: string;
 };
 
 export default function SetupHelpScreen({ navigation }: Props) {
@@ -234,31 +235,23 @@ export default function SetupHelpScreen({ navigation }: Props) {
         next.healthEcho = String(e?.message || e);
       }
 
-      // Optional: fetch "your SNAPI number" if endpoint exists (best-effort)
-      let fetched: string | null = null;
-      const candidates = ["/mobile/snapi-number", "/mobile/number", "/mobile/me/number"];
-      for (const path of candidates) {
-        try {
-          const r = await apiFetch(path, { method: "GET" });
-          const n =
-            clean((r as any)?.snapiNumber) ||
-            clean((r as any)?.number) ||
-            clean((r as any)?.value) ||
-            "";
-          if (n) {
-            fetched = n;
-            break;
-          }
-        } catch {
-          // ignore and try next candidate
-        }
+      // canonical SNAPI number fetch
+      try {
+        const data = await apiFetch("/app/api/snapi-number", { method: "GET" });
+        const fetched = clean((data as any)?.snapiNumber) || "";
+        setSnapiNumber(fetched || null);
+        next.snapiNumber = fetched;
+      } catch {
+        setSnapiNumber(null);
+        next.snapiNumber = "";
       }
 
-      if (fetched) {
-        setSnapiNumber(fetched);
-        next.snapiNumber = fetched;
-      } else {
-        next.snapiNumber = "";
+      // ADD THIS BLOCK
+      try {
+        const me = await apiFetch("/mobile/me-auth", { method: "GET" });
+        next.userId = clean((me as any)?.userId) || "";
+      } catch {
+        next.userId = "";
       }
 
       setDiag(next);
@@ -382,7 +375,10 @@ export default function SetupHelpScreen({ navigation }: Props) {
             </Text>
 
             <Text style={styles.mono}>
-              SNAPI Number: {snapiNumber || diag.snapiNumber || "(not loaded)"}
+              SNAPI Number: {diag.snapiNumber || "(not loaded)"}
+            </Text>
+            <Text style={styles.mono}>
+              User ID: {diag.userId || "(not loaded)"}
             </Text>
 
             {/* SNAPI Intercept contact instructions */}
