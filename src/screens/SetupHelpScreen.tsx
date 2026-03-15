@@ -158,7 +158,7 @@ export default function SetupHelpScreen({ navigation }: Props) {
         (found?.data || []).some((c) =>
           (c.phoneNumbers || []).some((p) => {
             const n = String(p.number || "").replace(/\s+/g, "");
-            return n === SNAPI_INTERCEPT_NUMBER;
+            return n === contactNumber;
           })
         ) || false;
 
@@ -170,7 +170,7 @@ export default function SetupHelpScreen({ navigation }: Props) {
       await Contacts.addContactAsync({
         [Contacts.Fields.FirstName]: "SNAPI",
         [Contacts.Fields.LastName]: "Intercept",
-        [Contacts.Fields.PhoneNumbers]: [{ label: "work", number: SNAPI_INTERCEPT_NUMBER }],
+        [Contacts.Fields.PhoneNumbers]: [{ label: "work", number: contactNumber }],
       } as any);
 
       Alert.alert("Saved", "SNAPI Intercept was added to your contacts.");
